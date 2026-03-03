@@ -1,4 +1,4 @@
-import type { Agent, CostSummary, AgentCost, Session, CronJob, Alert } from "./types";
+import type { Agent, CostSummary, AgentCost, Session, CronJob, Alert, ModelInfo, AgentConfig, CronCreateInput } from "./types";
 
 const BASE = "/api";
 
@@ -6,6 +6,13 @@ async function fetchJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
+}
+
+async function fetchWithError(url: string, options: RequestInit): Promise<any> {
+  const r = await fetch(url, options);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.details || data.error || `Request failed: ${r.status}`);
+  return data;
 }
 
 export const api = {
@@ -20,9 +27,29 @@ export const api = {
   getWorkspaceFile: (agent: string, path: string) => fetchJSON<{ content: string; path: string }>(`/workspace/${agent}/file?path=${encodeURIComponent(path)}`),
 
   // Drill Mode API methods
-  getAgentMemory: (id: string) => fetchJSON<{ filename: string; date: string; preview: string }[]>(`/agents/${id}/memory`),
+  getAgentMemory: (id: string) => fetchJSON<{ filename: string; date: string; content: string; fullPath?: string }[]>(`/agents/${id}/memory`),
   getAgentMemoryFile: (id: string, filename: string) => fetchJSON<{ filename: string; content: string }>(`/agents/${id}/memory/${encodeURIComponent(filename)}`),
   getAgentCosts: (id: string) => fetchJSON<{ today: number; thisWeek: number; thisMonth: number; total: number; byModel: Record<string, number>; runs: any[] }>(`/agents/${id}/costs`),
   getAgentCron: (id: string) => fetchJSON<CronJob[]>(`/agents/${id}/cron`),
   getAgentWorkspace: (id: string) => fetchJSON<{ agent: string; tree: any }>(`/agents/${id}/workspace`),
+
+  // Management API methods
+  getModels: () => fetchJSON<{ count: number; models: ModelInfo[] }>("/models"),
+  getAgentConfig: (id: string) => fetchJSON<AgentConfig>(`/agents/${id}/config`),
+  updateAgentModel: (id: string, model: string) =>
+    fetchWithError(`${BASE}/agents/${id}/model`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) }),
+  updateAgentThinking: (id: string, level: string) =>
+    fetchWithError(`${BASE}/agents/${id}/thinking`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level }) }),
+  stopAgent: (id: string) =>
+    fetchWithError(`${BASE}/agents/${id}/stop`, { method: "POST" }),
+  renameAgent: (id: string, name: string) =>
+    fetchWithError(`${BASE}/agents/${id}/rename`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }),
+  deleteAgent: (id: string) =>
+    fetchWithError(`${BASE}/agents/${id}`, { method: "DELETE" }),
+  runCronJob: (jobId: string) =>
+    fetchWithError(`${BASE}/cron/jobs/${jobId}/run`, { method: "POST" }),
+  deleteCronJob: (jobId: string) =>
+    fetchWithError(`${BASE}/cron/jobs/${jobId}`, { method: "DELETE" }),
+  createCronJob: (input: CronCreateInput) =>
+    fetchWithError(`${BASE}/cron/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }),
 };

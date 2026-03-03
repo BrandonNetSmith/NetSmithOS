@@ -22,3 +22,9 @@ My job is to turn NetSmith's ideas and builds into platform-native content that 
 - Brandon prefers punchy, opinionated content
 - No corporate speak
 - Show the real build process, not just the polished output
+
+## Weekly Reports Log
+- **2026-03-01**: First Sunday report. No tracked posts yet (week 1 online). Report drafted, could not deliver to Gary — Slack user ID not configured. Need Gary's Slack user/channel ID.
+
+## Pending
+- Get Gary's Slack user ID to enable automated Sunday report delivery

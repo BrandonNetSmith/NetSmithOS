@@ -1,34 +1,85 @@
 import { useState, useEffect } from 'react'
+import { api } from '../api/client'
 
-interface ModelConfig {
-  name: string
-  purpose: string
+interface AgentModel {
+  agentId: string
+  agentName: string
+  model: string
+  modelDisplay: string
   provider: string
-  status: 'Active' | 'Inactive'
-  cost: string
-  tokens: number
-  sessions: number
+  status: string
+  thinkingLevel: string
+  sessionCount: number
+  totalTokens: number
 }
 
-interface Session {
+interface SessionInfo {
   agent: string
   model: string
   lastActivity: string
   tokens: number
+  status: string
+  ageMs: number
+}
+
+const MODEL_COSTS: Record<string, string> = {
+  'opus': '$15/1M in · $75/1M out',
+  'sonnet-4': '$3/1M in · $15/1M out',
+  'sonnet': '$3/1M in · $15/1M out',
+  'haiku': '$0.25/1M in · $1.25/1M out',
+  'gpt-4o': '$2.50/1M in · $10/1M out',
+  'gpt-4': '$10/1M in · $30/1M out',
+  'gemini-2.5-flash': '$0.15/1M in · $0.60/1M out',
+  'gemini-2.5-pro': '$1.25/1M in · $10/1M out',
+  'gemini-2.0-flash': '$0.075/1M in · $0.30/1M out',
+  'grok-4': '$3/1M in · $15/1M out',
+  'grok-3': '$3/1M in · $15/1M out',
+  'grok-3-mini': '$0.30/1M in · $0.50/1M out',
+  'grok-2': '$2/1M in · $10/1M out',
+  'deepseek': '$0.27/1M in · $1.10/1M out',
+}
+
+function getModelCost(model: string): string {
+  const lower = model.toLowerCase()
+  for (const [key, cost] of Object.entries(MODEL_COSTS)) {
+    if (lower.includes(key)) return cost
+  }
+  return 'varies'
+}
+
+function getModelPurpose(model: string): string {
+  const lower = model.toLowerCase()
+  if (lower.includes('opus')) return 'Complex reasoning & analysis'
+  if (lower.includes('sonnet')) return 'Balanced performance'
+  if (lower.includes('haiku')) return 'Fast, simple tasks'
+  if (lower.includes('grok-4')) return 'Advanced reasoning (xAI)'
+  if (lower.includes('grok-3-mini')) return 'Fast lightweight tasks (xAI)'
+  if (lower.includes('grok-3')) return 'Balanced reasoning (xAI)'
+  if (lower.includes('grok-2')) return 'Legacy reasoning (xAI)'
+  if (lower.includes('grok-code')) return 'Code specialist (xAI)'
+  if (lower.includes('flash')) return 'Fast iteration & drafts'
+  if (lower.includes('pro')) return 'Advanced reasoning'
+  if (lower.includes('deepseek')) return 'Code & reasoning'
+  return 'General purpose'
+}
+
+function formatAge(ms: number): string {
+  if (!ms || ms < 0) return 'unknown'
+  const minutes = Math.floor(ms / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return minutes + 'm ago'
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours + 'h ' + (minutes % 60) + 'm ago'
+  const days = Math.floor(hours / 24)
+  return days + 'd ' + (hours % 24) + 'h ago'
 }
 
 export default function TaskManager() {
-  const [models, setModels] = useState<ModelConfig[]>([])
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [stats, setStats] = useState({
-    activeSessions: 0,
-    idleSessions: 0,
-    totalSessions: 0,
-    tokensUsed: 0,
-    totalCost: '$0.00'
-  })
-  const [lastRefresh, setLastRefresh] = useState(new Date())
+  const [agentModels, setAgentModels] = useState<AgentModel[]>([])
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState(new Date())
 
   useEffect(() => {
     loadData()
@@ -39,91 +90,83 @@ export default function TaskManager() {
   const loadData = async () => {
     try {
       setError(null)
-      const res = await fetch('/api/config')
-      if (!res.ok) throw new Error('Failed to fetch config')
-      
-      const config = await res.json()
-      
-      // Parse models from config
-      const modelList: ModelConfig[] = []
-      
-      // Extract default model
-      if (config.model) {
-        modelList.push({
-          name: config.model,
-          purpose: 'Default model',
-          provider: config.model.split('/')[0] || 'unknown',
-          status: 'Active',
-          cost: getModelCost(config.model),
-          tokens: 0,
-          sessions: 1
-        })
-      }
-      
-      // Extract models from providers
-      if (config.providers) {
-        for (const [provider, providerConfig] of Object.entries(config.providers)) {
-          const pc = providerConfig as any
-          if (pc.models) {
-            for (const model of pc.models) {
-              const modelName = typeof model === 'string' ? model : model.name
-              if (!modelList.find(m => m.name === modelName)) {
-                modelList.push({
-                  name: modelName,
-                  purpose: getModelPurpose(modelName),
-                  provider,
-                  status: 'Active',
-                  cost: getModelCost(modelName),
-                  tokens: 0,
-                  sessions: 0
-                })
-              }
-            }
-          }
+      const agents = await api.getAgents()
+      const configs = await Promise.allSettled(
+        agents.map((a: any) => api.getAgentConfig(a.id || a.agentId))
+      )
+
+      const modelMap = new Map<string, AgentModel>()
+      const allSessions: SessionInfo[] = []
+
+      for (let i = 0; i < agents.length; i++) {
+        const agent = agents[i] as any
+        const agentId = agent.id || agent.agentId
+        const config = configs[i].status === 'fulfilled' ? (configs[i] as any).value : null
+        const model = config?.model || agent.model || 'unknown'
+        const provider = model.includes('/')
+          ? (model.startsWith('openrouter/') ? model.split('/')[1] : model.split('/')[0])
+          : 'unknown'
+        const modelDisplay = model.startsWith('openrouter/')
+          ? model.replace('openrouter/', '').split('/').pop() || model
+          : model.split('/').pop() || model
+
+        const existing = modelMap.get(model)
+        if (existing) {
+          existing.sessionCount += agent.sessionCount || 0
+          existing.totalTokens += agent.totalTokens || 0
+        } else {
+          modelMap.set(model, {
+            agentId,
+            agentName: agent.name || agentId,
+            model,
+            modelDisplay,
+            provider,
+            status: agent.status || 'idle',
+            thinkingLevel: config?.thinkingLevel || 'off',
+            sessionCount: agent.sessionCount || 0,
+            totalTokens: agent.totalTokens || 0,
+          })
         }
-      }
 
-      // If no models found, add some defaults based on common config
-      if (modelList.length === 0) {
-        modelList.push({
-          name: 'anthropic/claude-opus-4-5',
-          purpose: 'Primary reasoning & complex tasks',
-          provider: 'anthropic',
-          status: 'Active',
-          cost: '$15.00/1M in, $75.00/1M out',
-          tokens: 0,
-          sessions: 1
+        allSessions.push({
+          agent: agent.name || agentId,
+          model: modelDisplay,
+          lastActivity: agent.lastActivity
+            ? formatAge(Date.now() - new Date(agent.lastActivity).getTime())
+            : 'no activity',
+          tokens: agent.totalTokens || 0,
+          status: agent.status || 'idle',
+          ageMs: agent.lastActivity
+            ? Date.now() - new Date(agent.lastActivity).getTime()
+            : Infinity,
         })
       }
 
-      setModels(modelList)
-
-      // Mock session data (would need OpenClaw API for real data)
-      const mockSessions: Session[] = [
-        { agent: 'Tim', model: config.model || 'claude-opus-4-5', lastActivity: 'now', tokens: 4200 }
-      ]
-      setSessions(mockSessions)
-
-      setStats({
-        activeSessions: mockSessions.length,
-        idleSessions: 0,
-        totalSessions: mockSessions.length,
-        tokensUsed: mockSessions.reduce((acc, s) => acc + s.tokens, 0),
-        totalCost: '$0.00'
-      })
-      
+      setAgentModels([...modelMap.values()])
+      setSessions(allSessions.sort((a, b) => a.ageMs - b.ageMs))
       setLastRefresh(new Date())
     } catch (err) {
       console.error('Failed to load data:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setLoading(false)
     }
+  }
+
+  const activeSessions = sessions.filter(s => s.status === 'active' || s.status === 'busy').length
+  const idleSessions = sessions.filter(s => s.status === 'idle').length
+  const totalTokens = sessions.reduce((acc, s) => acc + s.tokens, 0)
+  const uniqueModels = new Set(agentModels.map(m => m.model)).size
+
+  if (loading) {
+    return <div style={{ padding: '24px', color: 'var(--text-muted)' }}>Loading task manager...</div>
   }
 
   return (
     <>
       {error && (
-        <div style={{ 
-          background: 'rgba(239, 68, 68, 0.15)', 
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.15)',
           border: '1px solid rgba(239, 68, 68, 0.3)',
           borderRadius: 'var(--radius-md)',
           padding: '12px 16px',
@@ -131,71 +174,82 @@ export default function TaskManager() {
           color: '#ef4444',
           fontSize: '13px'
         }}>
-          ⚠️ {error}
+          {error}
         </div>
       )}
 
       <div className="stats-row">
         <div className="stat-card">
-          <div className="stat-label">Active Sessions</div>
-          <div className="stat-value accent">{stats.activeSessions}</div>
+          <div className="stat-label">Active</div>
+          <div className="stat-value accent">{activeSessions}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Idle</div>
-          <div className="stat-value">{stats.idleSessions}</div>
+          <div className="stat-value">{idleSessions}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Total Sessions</div>
-          <div className="stat-value">{stats.totalSessions}</div>
+          <div className="stat-label">Total Agents</div>
+          <div className="stat-value">{sessions.length}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Models in Use</div>
+          <div className="stat-value accent">{uniqueModels}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Tokens Used</div>
-          <div className="stat-value">{(stats.tokensUsed / 1000).toFixed(0)}K</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Total Cost</div>
-          <div className="stat-value accent">{stats.totalCost}</div>
+          <div className="stat-value">{totalTokens > 0 ? (totalTokens / 1000).toFixed(0) + 'K' : '0'}</div>
         </div>
       </div>
 
       <div className="section-title">Model Fleet</div>
       <div className="card-grid">
-        {models.map((model, i) => (
+        {agentModels.map((m, i) => (
           <div className="model-card" key={i}>
             <div className="card-header">
               <div>
-                <div className="card-title">{model.name}</div>
-                <div className="card-subtitle">{model.purpose}</div>
+                <div className="card-title">{m.modelDisplay}</div>
+                <div className="card-subtitle">{getModelPurpose(m.model)}</div>
               </div>
-              <span className={`status-badge ${model.status.toLowerCase()}`}>
-                {model.status}
+              <span className={'status-badge ' + (m.status === 'active' || m.status === 'busy' ? 'active' : 'inactive')}>
+                {m.status}
               </span>
             </div>
             <div className="card-stats">
               <div className="card-stat">
-                <span className="card-stat-label">Provider:</span>
-                <span className="card-stat-value">{model.provider}</span>
-              </div>
-              <div className="card-stat">
-                <span className="card-stat-label">Cost:</span>
-                <span className="card-stat-value">{model.cost}</span>
+                <span className="card-stat-label">Full key:</span>
+                <span className="card-stat-value" style={{ fontSize: '10px', opacity: 0.7 }}>{m.model}</span>
               </div>
             </div>
             <div className="card-stats">
               <div className="card-stat">
-                <span className="card-stat-label">Tokens:</span>
-                <span className="card-stat-value">{(model.tokens / 1000).toFixed(0)}K</span>
+                <span className="card-stat-label">Provider:</span>
+                <span className="card-stat-value">{m.provider}</span>
+              </div>
+              <div className="card-stat">
+                <span className="card-stat-label">Cost:</span>
+                <span className="card-stat-value">{getModelCost(m.model)}</span>
+              </div>
+            </div>
+            <div className="card-stats">
+              <div className="card-stat">
+                <span className="card-stat-label">Thinking:</span>
+                <span className="card-stat-value" style={{ color: m.thinkingLevel !== 'off' ? 'var(--accent-primary)' : undefined }}>
+                  {m.thinkingLevel}
+                </span>
               </div>
               <div className="card-stat">
                 <span className="card-stat-label">Sessions:</span>
-                <span className="card-stat-value">{model.sessions}</span>
+                <span className="card-stat-value">{m.sessionCount}</span>
               </div>
             </div>
           </div>
         ))}
+        {agentModels.length === 0 && (
+          <div style={{ color: 'var(--text-muted)', padding: '24px' }}>No agents configured</div>
+        )}
       </div>
 
-      <div className="section-title">Active Sessions</div>
+      <div className="section-title">Agent Sessions</div>
       <div className="card-grid">
         {sessions.map((session, i) => (
           <div className="session-card" key={i}>
@@ -204,7 +258,9 @@ export default function TaskManager() {
                 <div className="card-title">{session.agent}</div>
                 <div className="card-subtitle">{session.model}</div>
               </div>
-              <span className="status-badge active">Active</span>
+              <span className={'status-badge ' + (session.status === 'active' || session.status === 'busy' ? 'active' : 'inactive')}>
+                {session.status}
+              </span>
             </div>
             <div className="card-stats">
               <div className="card-stat">
@@ -213,7 +269,7 @@ export default function TaskManager() {
               </div>
               <div className="card-stat">
                 <span className="card-stat-label">Tokens:</span>
-                <span className="card-stat-value">{(session.tokens / 1000).toFixed(1)}K</span>
+                <span className="card-stat-value">{session.tokens > 0 ? (session.tokens / 1000).toFixed(1) + 'K' : '0'}</span>
               </div>
             </div>
           </div>
@@ -221,27 +277,8 @@ export default function TaskManager() {
       </div>
 
       <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '24px' }}>
-        Last refreshed: {lastRefresh.toLocaleTimeString()} • Auto-refresh every 30s
+        Last refreshed: {lastRefresh.toLocaleTimeString()} &middot; Auto-refresh every 30s
       </div>
     </>
   )
-}
-
-function getModelCost(model: string): string {
-  if (model.includes('opus')) return '$15/1M in, $75/1M out'
-  if (model.includes('sonnet')) return '$3/1M in, $15/1M out'
-  if (model.includes('haiku')) return '$0.25/1M in, $1.25/1M out'
-  if (model.includes('gpt-4')) return '$10/1M in, $30/1M out'
-  if (model.includes('gemini') && model.includes('flash')) return '$0.075/1M in, $0.30/1M out'
-  if (model.includes('gemini') && model.includes('pro')) return '$1.25/1M in, $5/1M out'
-  return 'varies'
-}
-
-function getModelPurpose(model: string): string {
-  if (model.includes('opus')) return 'Complex reasoning & analysis'
-  if (model.includes('sonnet')) return 'Balanced performance'
-  if (model.includes('haiku')) return 'Fast, simple tasks'
-  if (model.includes('flash')) return 'Fast iteration & drafts'
-  if (model.includes('pro')) return 'Advanced reasoning'
-  return 'General purpose'
 }

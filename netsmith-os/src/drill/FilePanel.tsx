@@ -3,18 +3,12 @@ import { api } from "../api/client";
 
 interface WorkspaceFile {
   name: string;
-  size: number;
+  size: string;
   type: string;
 }
 
 interface FilePanelProps {
   agentId: string;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 export function FilePanel({ agentId }: FilePanelProps) {
@@ -36,8 +30,8 @@ export function FilePanel({ agentId }: FilePanelProps) {
           setFiles(
             Array.isArray(data.files)
               ? data.files.map((f: any) => ({
-                  name: f.name || f.path || f,
-                  size: f.size || 0,
+                  name: f.name || f.path || String(f),
+                  size: String(f.size || "0 B"),
                   type: f.type || "file",
                 }))
               : []
@@ -115,7 +109,7 @@ export function FilePanel({ agentId }: FilePanelProps) {
                 onClick={() => handleSelectFile(f.name)}
               >
                 <span className="file-entry-name">{f.name}</span>
-                <span className="file-entry-size">{formatSize(f.size)}</span>
+                <span className="file-entry-size">{f.size}</span>
               </div>
             ))}
           </div>

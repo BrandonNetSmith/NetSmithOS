@@ -61,6 +61,8 @@ export interface CronJob {
     usage: { input_tokens: number; output_tokens: number; total_tokens: number };
     durationMs: number;
   } | null;
+  lastError?: string | null;
+  consecutiveErrors?: number;
 }
 
 export interface Alert {
@@ -71,7 +73,7 @@ export interface Alert {
   jobId?: string;
 }
 
-export type AppMode = "bridge" | "drill" | "forge" | "health" | "org" | "tasks" | "standup" | "workspaces" | "docs";
+export type AppMode = "bridge" | "drill" | "forge" | "health" | "activity" | "org" | "tasks" | "standup" | "workspaces" | "docs" | "settings";
 
 export interface ModelInfo {
   key: string;

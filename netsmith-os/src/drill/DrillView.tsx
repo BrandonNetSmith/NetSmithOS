@@ -1,19 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api } from "../api/client";
 import { SessionPanel } from "./SessionPanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { CostPanel } from "./CostPanel";
 import { CronPanel } from "./CronPanel";
 import { FilePanel } from "./FilePanel";
+import { AgentControlBar } from "./AgentControlBar";
 import type { Agent, Session } from "../api/types";
 import "../styles/drill.css";
 
 interface DrillViewProps {
   agentId: string;
   onBack: () => void;
+  onAgentDeleted: () => void;
 }
 
-export function DrillView({ agentId, onBack }: DrillViewProps) {
+export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +60,10 @@ export function DrillView({ agentId, onBack }: DrillViewProps) {
 
     return () => clearInterval(interval);
   }, [agentId]);
+
+  const handleAgentRenamed = useCallback((newName: string) => {
+    setAgent(prev => prev ? { ...prev, name: newName } : prev);
+  }, []);
 
   if (loading) {
     return (
@@ -110,6 +116,15 @@ export function DrillView({ agentId, onBack }: DrillViewProps) {
           {agent?.status || "idle"}
         </div>
       </div>
+
+      {/* Agent Control Bar */}
+      <AgentControlBar
+        agentId={agentId}
+        currentModel={agent?.model || null}
+        agentStatus={agent?.status || "idle"}
+        onAgentDeleted={onAgentDeleted}
+        onAgentRenamed={handleAgentRenamed}
+      />
 
       {/* 2-Column Grid: 6 Panels */}
       <div className="drill-content">

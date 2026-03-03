@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   { mode: 'standup', icon: '📋', label: 'Standup' },
   { mode: 'workspaces', icon: '🗂', label: 'Workspaces' },
   { mode: 'docs', icon: '📖', label: 'Docs' },
+  { mode: 'activity', icon: '📜', label: 'Activity' },
 ];
 
 interface NavSidebarProps {
@@ -39,7 +40,7 @@ export function NavSidebar({ currentMode, onNavigate }: NavSidebarProps) {
         className='module-btn settings'
         title='Settings'
         aria-label='Settings'
-        onClick={() => {}}
+        onClick={() => onNavigate('settings' as AppMode)}
       >
         ⚙
       </button>

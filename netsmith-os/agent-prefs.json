@@ -1,0 +1,17 @@
+{
+  "main": {
+    "thinkingLevel": "high"
+  },
+  "elon": {
+    "thinkingLevel": "high"
+  },
+  "warren": {
+    "thinkingLevel": "high"
+  },
+  "noah": {
+    "thinkingLevel": "medium"
+  },
+  "gary": {
+    "thinkingLevel": "high"
+  }
+}

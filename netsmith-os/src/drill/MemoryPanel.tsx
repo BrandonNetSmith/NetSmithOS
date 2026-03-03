@@ -5,7 +5,8 @@ import ReactMarkdown from "react-markdown";
 interface MemoryEntry {
   filename: string;
   date: string;
-  preview: string;
+  content: string;
+  fullPath?: string;
 }
 
 interface MemoryPanelProps {
@@ -43,7 +44,7 @@ export function MemoryPanel({ agentId }: MemoryPanelProps) {
     return entries.filter(
       (e) =>
         e.filename.toLowerCase().includes(q) ||
-        e.preview.toLowerCase().includes(q)
+        (e.content || "").toLowerCase().includes(q)
     );
   }, [entries, search]);
 
@@ -100,7 +101,9 @@ export function MemoryPanel({ agentId }: MemoryPanelProps) {
                   <span className="memory-entry-name">{entry.filename}</span>
                   <span className="memory-entry-date">{entry.date}</span>
                 </div>
-                <div className="memory-entry-preview">{entry.preview}</div>
+                <div className="memory-entry-preview">
+                  {(entry.content || "").slice(0, 120)}
+                </div>
               </div>
             ))}
           </div>

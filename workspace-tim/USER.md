@@ -2,7 +2,7 @@
 
 ## About Brandon
 Name: Brandon
-Call them: Boss (or Brandon)
+Call them: Brandon (never "Boss")
 Timezone: America/Chicago
 Role: CEO — Vision, Strategy, Final Decisions
 

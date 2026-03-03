@@ -1,10 +1,15 @@
+import dotenv from "dotenv";
+import { join as dotenvJoin } from "path";
+import { homedir as dotenvHome } from "os";
+dotenv.config({ path: dotenvJoin(dotenvHome(), "steelclaw", ".env") });
+
 import express from 'express';
 import cors from 'cors';
 import { readdir, readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
 import { join, resolve } from 'path';
-import { homedir } from 'os';
-import { execFile } from 'child_process';
+import { homedir, cpus, totalmem, freemem, hostname, platform, release, arch, uptime as osUptime } from 'os';
+import { execFile, execSync } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -24,6 +29,33 @@ const OPENCLAW_CONFIG = join(HOME, '.openclaw', 'openclaw.json');
 const CRON_JOBS_FILE = join(HOME, '.openclaw', 'cron', 'jobs.json');
 const CRON_RUNS_DIR = join(HOME, '.openclaw', 'cron', 'runs');
 const STANDUPS_DIR = join(HOME, 'steelclaw', 'workspace', 'standups');
+const AGENT_PREFS_FILE = join(HOME, 'steelclaw', 'netsmith-os', 'agent-prefs.json');
+
+// ─── Agent preferences (thinking level, etc.) ──────────────────────────────────
+async function loadAgentPrefs() {
+  try {
+    const data = await readFile(AGENT_PREFS_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function saveAgentPrefs(prefs) {
+  await writeFile(AGENT_PREFS_FILE, JSON.stringify(prefs, null, 2));
+}
+
+async function getAgentPref(agentId, key, defaultVal) {
+  const prefs = await loadAgentPrefs();
+  return prefs?.[agentId]?.[key] ?? defaultVal;
+}
+
+async function setAgentPref(agentId, key, value) {
+  const prefs = await loadAgentPrefs();
+  if (!prefs[agentId]) prefs[agentId] = {};
+  prefs[agentId][key] = value;
+  await saveAgentPrefs(prefs);
+}
 
 const WORKSPACES = {
   'main': join(HOME, 'steelclaw', 'workspace'),
@@ -61,7 +93,7 @@ try {
 
 // ─── CLI output cache ───────────────────────────────────────────────────────────
 const cliCache = new Map();
-const CLI_CACHE_TTL = 10_000; // 10 seconds
+const CLI_CACHE_TTL = 30_000; // 30 seconds — SSE pushes realtime updates // 10 seconds
 
 async function cachedExec(command, args, cacheKey) {
   const now = Date.now();
@@ -81,6 +113,11 @@ async function cachedExec(command, args, cacheKey) {
   }
 }
 
+
+// ─── Async config helpers (non-blocking) ────────────────────────────────────────
+async function getAgentsList() {
+  return cachedExec('openclaw', ['config', 'get', 'agents.list', '--json'], 'agents-list-config');
+}
 // ─── In-memory alerts ───────────────────────────────────────────────────────────
 let activeAlerts = [];
 
@@ -470,24 +507,149 @@ ${topic}
 // NEW WAR ROOM ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// GET /api/health — Gateway health check
+// GET /api/health — Full system health (gateway + hardware + services)
 app.get('/api/health', async (req, res) => {
   try {
-    const statusData = await cachedExec('openclaw', ['status', '--json'], 'status');
-    const agentCount = statusData.heartbeat?.agents?.length || 0;
+    // Gateway status
+    let gatewayStatus = 'offline';
+    let agentCount = 0;
+    try {
+      const statusData = await cachedExec('openclaw', ['status', '--json'], 'status');
+      gatewayStatus = 'online';
+      agentCount = statusData.heartbeat?.agents?.length || 0;
+    } catch { /* gateway down */ }
+
+    // CPU usage (average over all cores from /proc/stat)
+    let cpuUsage = 0;
+    try {
+      const cpuOut = execSync("grep '^cpu ' /proc/stat", { encoding: 'utf8', timeout: 2000 }).trim();
+      const parts = cpuOut.split(/\s+/).slice(1).map(Number);
+      const idle = parts[3] + (parts[4] || 0);
+      const total = parts.reduce((a, b) => a + b, 0);
+      // Compare with cached previous reading for delta
+      if (global._lastCpu) {
+        const dIdle = idle - global._lastCpu.idle;
+        const dTotal = total - global._lastCpu.total;
+        cpuUsage = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
+      }
+      global._lastCpu = { idle, total };
+    } catch { cpuUsage = 0; }
+
+    // Memory
+    const totalMem = totalmem();
+    const freeMem = freemem();
+    const usedMem = totalMem - freeMem;
+
+    // Disk usage
+    let diskInfo = { total: 0, used: 0, free: 0, percent: 0 };
+    try {
+      const dfOut = execSync("df -B1 / | tail -1", { encoding: 'utf8', timeout: 2000 }).trim();
+      const dfParts = dfOut.split(/\s+/);
+      diskInfo = {
+        total: parseInt(dfParts[1]) || 0,
+        used: parseInt(dfParts[2]) || 0,
+        free: parseInt(dfParts[3]) || 0,
+        percent: parseInt(dfParts[4]) || 0,
+      };
+    } catch { /* silent */ }
+
+    // Uptime formatted
+    const uptimeSec = osUptime();
+    const days = Math.floor(uptimeSec / 86400);
+    const hours = Math.floor((uptimeSec % 86400) / 3600);
+    const mins = Math.floor((uptimeSec % 3600) / 60);
+    const uptimeFormatted = days > 0 ? `${days}d ${hours}h ${mins}m` : `${hours}h ${mins}m`;
+
+    // Services check (systemd user units)
+    let services = [];
+    try {
+      const svcList = ['openclaw-gateway.service', 'signal-cli-rest-api.service'];
+      for (const svc of svcList) {
+        try {
+          const svcOut = execSync(`systemctl --user show ${svc} --property=ActiveState,SubState --no-pager 2>/dev/null`, { encoding: 'utf8', timeout: 2000 });
+          const activeMatch = svcOut.match(/ActiveState=(\w+)/);
+          const subMatch = svcOut.match(/SubState=(\w+)/);
+          const svcUptime = execSync(`systemctl --user show ${svc} --property=ActiveEnterTimestamp --no-pager 2>/dev/null`, { encoding: 'utf8', timeout: 2000 });
+          const tsMatch = svcUptime.match(/ActiveEnterTimestamp=(.+)/);
+          let runningSince = '';
+          if (tsMatch && tsMatch[1].trim()) {
+            const started = new Date(tsMatch[1].trim());
+            const diffMs = Date.now() - started.getTime();
+            const diffH = Math.floor(diffMs / 3600000);
+            const diffM = Math.floor((diffMs % 3600000) / 60000);
+            runningSince = diffH > 24 ? `${Math.floor(diffH/24)}d ${diffH%24}h` : `${diffH}h ${diffM}m`;
+          }
+          services.push({
+            name: svc.replace('.service', ''),
+            status: activeMatch?.[1] || 'unknown',
+            uptime: runningSince,
+          });
+        } catch {
+          services.push({ name: svc.replace('.service', ''), status: 'inactive', uptime: '' });
+        }
+      }
+      // Also check docker services
+      try {
+        const dockerPs = execSync("docker ps --format '{{.Names}}|{{.Status}}' 2>/dev/null", { encoding: 'utf8', timeout: 3000 });
+        for (const line of dockerPs.trim().split('\n').filter(Boolean)) {
+          const [name, status] = line.split('|');
+          if (name) {
+            services.push({
+              name: name,
+              status: status?.includes('Up') ? 'active' : 'inactive',
+              uptime: status?.replace(/^Up /, '') || '',
+            });
+          }
+        }
+      } catch { /* no docker */ }
+    } catch { /* silent */ }
+
+    const cpuInfo = cpus();
     res.json({
-      gateway: 'online',
-      uptime: process.uptime(),
+      // Legacy fields for Bridge Mode TopBar compatibility
+      gateway: gatewayStatus,
       version: '1.0.0',
       agentCount,
+      // Full system health for Health page
+      cpu: {
+        model: cpuInfo[0]?.model || 'Unknown',
+        cores: cpuInfo.length,
+        usage: cpuUsage,
+      },
+      memory: {
+        total: totalMem,
+        used: usedMem,
+        free: freeMem,
+        percent: Math.round((usedMem / totalMem) * 100),
+      },
+      disk: diskInfo,
+      uptime: {
+        seconds: uptimeSec,
+        formatted: uptimeFormatted,
+      },
+      system: {
+        hostname: hostname(),
+        platform: platform(),
+        release: release(),
+        arch: arch(),
+        nodeVersion: process.version,
+      },
+      services,
+      timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    res.json({
-      gateway: 'offline',
-      uptime: process.uptime(),
+    res.status(500).json({
+      gateway: 'error',
+      uptime: { seconds: osUptime(), formatted: '?' },
       version: '1.0.0',
       agentCount: 0,
       error: err.message,
+      system: { hostname: hostname(), platform: platform(), release: release(), arch: arch(), nodeVersion: process.version },
+      cpu: { model: 'Unknown', cores: 0, usage: 0 },
+      memory: { total: 0, used: 0, free: 0, percent: 0 },
+      disk: { total: 0, used: 0, free: 0, percent: 0 },
+      services: [],
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -659,6 +821,39 @@ app.get('/api/costs/by-agent', async (req, res) => {
   }
 });
 
+// GET /api/activity — Recent cron run activity log
+app.get('/api/activity', async (req, res) => {
+  try {
+    const allRuns = await readAllCronRuns();
+    const finished = allRuns
+      .filter(r => r.action === 'finished')
+      .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+      .slice(0, 100)
+      .map(r => {
+        let agentId = 'unknown';
+        if (r.sessionKey) {
+          const m = r.sessionKey.match(/^agent:([^:]+):/);
+          if (m) agentId = m[1];
+        }
+        return {
+          ts: r.ts,
+          jobId: r.jobId,
+          agentId,
+          status: r.status,
+          error: r.error || null,
+          summary: r.summary || null,
+          durationMs: r.durationMs || 0,
+          model: r.model || null,
+          provider: r.provider || null,
+          usage: r.usage || null,
+        };
+      });
+    res.json(finished);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read activity', details: err.message });
+  }
+});
+
 // GET /api/cron/jobs — All cron jobs with last run status
 app.get('/api/cron/jobs', async (req, res) => {
   try {
@@ -689,6 +884,8 @@ app.get('/api/cron/jobs', async (req, res) => {
           delivery: job.delivery,
           state: job.state,
           lastRun,
+          lastError: job.lastError || null,
+          consecutiveErrors: job.consecutiveErrors || 0,
         };
       })
     );
@@ -973,6 +1170,8 @@ app.get('/api/agents/:id/cron', async (req, res) => {
           delivery: job.delivery,
           state: job.state,
           lastRun,
+          lastError: job.lastError || null,
+          consecutiveErrors: job.consecutiveErrors || 0,
         };
       })
     );
@@ -1290,6 +1489,210 @@ function formatDate(dateStr) {
   });
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MANAGEMENT ENDPOINTS — Model, Thinking, Agent, Cron CRUD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/models', async (req, res) => {
+  try {
+    // Use 5-minute cache to avoid slow CLI call on every request
+    const cacheKey = '_modelListCache';
+    const cacheTTL = 5 * 60 * 1000; // 5 minutes
+    if (global[cacheKey] && (Date.now() - global[cacheKey].ts < cacheTTL)) {
+      return res.json(global[cacheKey].data);
+    }
+    const output = execSync('openclaw models list --all --json', { encoding: 'utf8', timeout: 60000 });
+    const data = JSON.parse(output);
+    // Filter to available models and group by provider
+    const models = (data.models || [])
+      .filter(m => m.available)
+      .map(m => ({
+        key: m.key,
+        name: m.name,
+        provider: m.key.startsWith('openrouter/') ? m.key.split('/')[1] : m.key.split('/')[0],
+        contextWindow: m.contextWindow || null,
+        reasoning: m.key.includes(':thinking') || m.name.toLowerCase().includes('thinking'),
+      }));
+    const responseData = { count: models.length, models };
+    global[cacheKey] = { ts: Date.now(), data: responseData };
+    res.json(responseData);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list models', details: err.message });
+  }
+});
+
+app.patch('/api/agents/:id/model', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { model } = req.body;
+  if (!model) return res.status(400).json({ error: 'model is required' });
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    // Find the agent's index in the config list
+    const agentsList = await getAgentsList();
+    const idx = agentsList.findIndex(a => a.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'Agent not found in config' });
+    
+    await execFileAsync("openclaw", ["config", "set", `agents.list.${idx}.model`, `"${model}"`], { timeout: 10000 });
+    // Clear CLI cache so next status fetch reflects the change
+    cliCache.clear();
+    res.json({ success: true, agentId: id, model });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update model', details: err.message });
+  }
+});
+
+app.patch('/api/agents/:id/thinking', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { level } = req.body; // off, minimal, low, medium, high
+  const validLevels = ['off', 'minimal', 'low', 'medium', 'high'];
+  if (!level || !validLevels.includes(level)) {
+    return res.status(400).json({ error: 'level must be one of: ' + validLevels.join(', ') });
+  }
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    // Store thinking level in local prefs file (OpenClaw config doesn't support per-agent thinking)
+    await setAgentPref(id, 'thinkingLevel', level);
+    res.json({ success: true, agentId: id, thinkingLevel: level });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update thinking level', details: err.message });
+  }
+});
+
+app.post('/api/agents/:id/stop', async (req, res) => {
+  const { id } = req.params;
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    // Use the sessions command to check if the agent has active runs, then cancel
+    const output = execSync(`openclaw sessions --agent ${id} --json`, { encoding: 'utf8', timeout: 10000 });
+    // The stop is best-effort - we try to interrupt via the gateway
+    try {
+      execSync(`openclaw gateway rpc runs.stop --agent ${id}`, { encoding: 'utf8', timeout: 10000 });
+    } catch {
+      // Fallback: some versions may not support this exact command
+    }
+    cliCache.clear();
+    res.json({ success: true, agentId: id, message: 'Stop signal sent' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to stop agent', details: err.message });
+  }
+});
+
+app.patch('/api/agents/:id/rename', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    execSync(`openclaw agents set-identity --agent ${id} --name "${name.trim()}"`, { encoding: 'utf8', timeout: 10000 });
+    // Update our local metadata
+    AGENT_META[id].name = name.trim();
+    cliCache.clear();
+    res.json({ success: true, agentId: id, name: name.trim() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to rename agent', details: err.message });
+  }
+});
+
+app.delete('/api/agents/:id', async (req, res) => {
+  const { id } = req.params;
+  if (id === 'main') return res.status(403).json({ error: 'Cannot delete the main agent' });
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    execSync(`openclaw agents delete ${id} --force --json`, { encoding: 'utf8', timeout: 15000 });
+    delete AGENT_META[id];
+    delete WORKSPACES[id];
+    cliCache.clear();
+    res.json({ success: true, agentId: id, message: 'Agent deleted' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete agent', details: err.message });
+  }
+});
+
+app.post('/api/cron/jobs/:jobId/run', async (req, res) => {
+  const { jobId } = req.params;
+  try {
+    const output = execSync(`openclaw cron run ${jobId}`, { encoding: 'utf8', timeout: 120000 });
+    cliCache.clear();
+    // cron run returns plain text, not JSON
+    res.json({ success: true, jobId, output: output.trim() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to run cron job', details: err.message });
+  }
+});
+
+app.delete('/api/cron/jobs/:jobId', async (req, res) => {
+  const { jobId } = req.params;
+  try {
+    execSync(`openclaw cron rm ${jobId} --json`, { encoding: 'utf8', timeout: 15000 });
+    cliCache.clear();
+    res.json({ success: true, jobId, message: 'Cron job deleted' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete cron job', details: err.message });
+  }
+});
+
+app.post('/api/cron/jobs', express.json(), async (req, res) => {
+  const { agentId, name, message, schedule, announce, channel, session, thinking, model } = req.body;
+  if (!agentId) return res.status(400).json({ error: 'agentId is required' });
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!message) return res.status(400).json({ error: 'message is required' });
+  
+  try {
+    let cmd = `openclaw cron add --agent ${agentId} --name "${name}" --message "${message.replace(/"/g, '\\"')}"`;
+    
+    // Schedule: support cron expression, interval, or one-time
+    if (schedule) {
+      if (schedule.cron) cmd += ` --cron "${schedule.cron}"`;
+      else if (schedule.every) cmd += ` --every "${schedule.every}"`;
+      else if (schedule.at) cmd += ` --at "${schedule.at}"`;
+      if (schedule.tz) cmd += ` --tz "${schedule.tz}"`;
+    }
+    
+    if (announce) cmd += ' --announce';
+    if (channel) cmd += ` --channel "${channel}"`;
+    if (session) cmd += ` --session ${session}`;
+    if (thinking) cmd += ` --thinking ${thinking}`;
+    if (model) cmd += ` --model "${model}"`;
+    cmd += ' --json';
+    
+    const output = execSync(cmd, { encoding: 'utf8', timeout: 15000 });
+    cliCache.clear();
+    let result;
+    try { result = JSON.parse(output); } catch { result = { output }; }
+    res.json({ success: true, result });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create cron job', details: err.message });
+  }
+});
+
+app.get('/api/agents/:id/config', async (req, res) => {
+  const { id } = req.params;
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+  
+  try {
+    const agentsList = await getAgentsList();
+    const agent = agentsList.find(a => a.id === id);
+    if (!agent) return res.status(404).json({ error: 'Agent not found in config' });
+    
+    const thinkingLevel = await getAgentPref(id, 'thinkingLevel', 'off');
+    res.json({
+      id: agent.id,
+      model: agent.model || null,
+      thinkingLevel,
+      heartbeat: agent.heartbeat || null,
+      workspace: agent.workspace || null,
+      identity: agent.identity || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get agent config', details: err.message });
+  }
+});
 // ═══════════════════════════════════════════════════════════════════════════════
 // START SERVER
 // ═══════════════════════════════════════════════════════════════════════════════

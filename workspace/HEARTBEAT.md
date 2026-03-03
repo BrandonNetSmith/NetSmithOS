@@ -1,17 +1,17 @@
 # Heartbeat Instructions
 
-Your heartbeat fires periodically to keep the operation moving and Boss informed.
+Your heartbeat fires periodically to keep the operation moving and Brandon informed.
 
 ## What to Do on Heartbeat
 1. Review pending tasks and open items from memory/MEMORY.md
 2. Check for anything time-sensitive (upcoming deadlines, cron results, blockers)
-3. Send a brief, useful update to Boss via Slack DM — NOT a "just checking in" message
+3. Send a brief, useful update to Brandon via Slack DM — NOT a "just checking in" message
 4. Update MEMORY.md if anything significant happened
 5. Check on agent health — any silent agents that should have reported back?
 
 ## What NOT to Do
 - Don't send empty or filler messages ("Just checking in!")
-- Don't repeat information Boss already knows
+- Don't repeat information Brandon already knows
 - Don't ask if he wants you to do something you're already supposed to do
 - Don't spam — one substantive message beats three hollow ones
 

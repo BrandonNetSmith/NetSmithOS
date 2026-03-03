@@ -51,18 +51,18 @@
 | `healthcheck` | Service health monitoring |
 
 ## Operational Workflow
-1. **Receive** — Incoming request from Boss or scheduled task
+1. **Receive** — Incoming request from Brandon or scheduled task
 2. **Assess** — Scope, dependencies, risks, owner
 3. **Delegate** — Route to the right specialist with clear scope and expected outcome
 4. **Track** — Monitor progress, follow up on silence, flag blockers
-5. **Report** — Update Boss on status without being asked
+5. **Report** — Update Brandon on status without being asked
 6. **Close** — Verify outcome, update MEMORY.md, capture lessons
 
 ## Cron Jobs (Scheduled)
 | Job | Schedule | Purpose |
 |---|---|---|
 | `nightly-business-idea` | 2:00 AM CT | Generate and log business ideas |
-| `morning-brief` | 8:00 AM CT | Operational summary for Boss |
+| `morning-brief` | 8:00 AM CT | Operational summary for Brandon |
 | `weekly-checkin` | Sun 11:00 PM CT | Weekly review and planning |
 
 ## Key Config Files

@@ -10,6 +10,8 @@ import TaskManager from '../pages/TaskManager';
 import Standup from '../pages/Standup';
 import Workspaces from '../pages/Workspaces';
 import Docs from '../pages/Docs';
+import ActivityLog from '../pages/ActivityLog';
+import SettingsStub from '../pages/SettingsStub';
 import type { AppMode } from '../api/types';
 
 interface ErrorBoundaryProps {
@@ -47,6 +49,8 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   standup: { title: 'Executive Standup', subtitle: 'Kick off meetings with the chiefs' },
   workspaces: { title: 'Workspaces', subtitle: 'Agent workspace files and context' },
   docs: { title: 'Documentation', subtitle: 'Guides, references, and architecture docs' },
+  activity: { title: 'Activity Log', subtitle: 'Cron runs, agent activity, and system events' },
+  settings: { title: 'Settings', subtitle: 'Configuration, API keys, and system preferences' },
 };
 
 export function ModeRouter() {
@@ -192,6 +196,18 @@ export function ModeRouter() {
         return (
           <PageShell title={PAGE_META.docs.title} subtitle={PAGE_META.docs.subtitle}>
             <Docs />
+          </PageShell>
+        );
+      case 'activity':
+        return (
+          <PageShell title={PAGE_META.activity.title} subtitle={PAGE_META.activity.subtitle}>
+            <ActivityLog />
+          </PageShell>
+        );
+      case 'settings':
+        return (
+          <PageShell title={PAGE_META.settings.title} subtitle={PAGE_META.settings.subtitle}>
+            <SettingsStub />
           </PageShell>
         );
       default:

@@ -18,14 +18,14 @@ CEO: Brandon (human)
         Model: Gemini 2.5 Flash | Status: Active
         ├── CTO: Elon 🔨
         │   Backend & Infrastructure & Security
-        │   Model: Claude Sonnet 4.6 | Status: Active
+        │   Model: Claude Opus 4.6 | Status: Active
         │
         ├── CMO: Gary 📣
         │   Content & Marketing & Distribution
         │   Model: Claude Sonnet 4.6 | Status: Active
         │   └── Social Media Manager: Noah 📱
         │         Social Media Strategy & Content
-        │         Model: Claude Sonnet 4.6 | Status: Active
+        │         Model: Gemini 2.5 Flash | Status: Active
         │
         ├── CRO: Warren 💰
         │   Revenue & Community & Partnerships
@@ -47,10 +47,10 @@ CEO: Brandon (human)
 |--------|-----------------------|----------------------|---------|------------------------------------|
 | Tim    | COO                   | Gemini 2.5 Flash     | Active  | ~/steelclaw/workspace/             |
 | Elon   | CTO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-elon/        |
-| Gary   | CMO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-gary/        |
-| Noah   | Social Media Manager  | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-noah/        |
-| Warren | CRO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-warren/      |
-| Steve  | CPO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-steve/       |
+| Gary   | CMO                   | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-gary/        |
+| Noah   | Social Media Manager  | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-noah/        |
+| Warren | CRO                   | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-warren/      |
+| Steve  | CPO                   | Claude Opus 4.6    | Active  | ~/steelclaw/workspace-steve/       
 | Calvin | Community Agent       | Gemini 2.5 Flash     | Active  | ~/steelclaw/workspace-calvin/      |
 
 ---
@@ -69,7 +69,7 @@ Tim (Gemini Flash) ──── cheap, constant, routes everything
     ├── CRO Warren (Sonnet)
     │       └── Calvin (Gemini Flash) ── community chat
     │
-    └── CPO Steve (Sonnet)
+    └── CPO Steve (Opus)
 ```
 
 ## Delegation Rules
@@ -84,4 +84,4 @@ Tim (Gemini Flash) ──── cheap, constant, routes everything
 
 ---
 
-Last updated: 2026-02-28
+Last updated: 2026-03-1

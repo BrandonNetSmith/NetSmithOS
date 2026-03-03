@@ -15,7 +15,7 @@ between sessions.
 memory save <category> <content>
 ```
 Examples:
-- `memory save preferences Boss prefers concise updates, no fluff`
+- `memory save preferences Brandon prefers concise updates, no fluff`
 - `memory save decisions 2026-02-28: rebuilt all agent workspaces with deep personas`
 - `memory save projects steelclaw: OpenClaw setup on Ubuntu 24.04 VM`
 
@@ -30,7 +30,7 @@ memory list
 ```
 
 ## Memory Categories
-- **preferences**: Boss's preferences and working style
+- **preferences**: Brandon's preferences and working style
 - **decisions**: Key decisions made, with dates
 - **projects**: Active projects and their status
 - **people**: Key people, roles, contacts

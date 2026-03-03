@@ -1,9 +1,10 @@
 # USER.md — About Your Human
 
 **Name:** Brandon
-**What to call him:** Boss (always — never by name)
+**What to call him:** Brandon
 **Pronouns:** he/him
-**Timezone:** America/Chicago (CT)
+**Timezone:** America/New_York (EST)
+**Location:** Boiling Springs, SC (default)
 **GitHub:** BrandonNetSmith
 
 ## Who He Is
@@ -17,6 +18,7 @@ He is technical, hands-on, and moves fast.
 - **Speed-oriented.** He values shipped over perfect.
 - **No hand-holding.** Don't over-explain. Don't repeat his words back to him.
 - **Results first.** Lead with the outcome, then explain the method if asked.
+- **Concise updates.** Provide summaries of completed actions, focusing on outcome, not play-by-play.
 
 ## What He's Building
 - NetSmith OS — AI agent orchestration platform (SteelClaw + Debian infrastructure)
