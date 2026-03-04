@@ -15,6 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { mode: 'workspaces', icon: '🗂', label: 'Workspaces' },
   { mode: 'docs', icon: '📖', label: 'Docs' },
   { mode: 'activity', icon: '📜', label: 'Activity' },
+  { mode: 'costs', icon: '💰', label: 'Costs' },
 ];
 
 interface NavSidebarProps {

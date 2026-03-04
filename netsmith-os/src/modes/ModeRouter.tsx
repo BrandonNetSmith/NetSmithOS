@@ -11,6 +11,7 @@ import Standup from '../pages/Standup';
 import Workspaces from '../pages/Workspaces';
 import Docs from '../pages/Docs';
 import ActivityLog from '../pages/ActivityLog';
+import CostExplorer from '../pages/CostExplorer';
 import SettingsStub from '../pages/SettingsStub';
 import type { AppMode } from '../api/types';
 
@@ -50,6 +51,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   workspaces: { title: 'Workspaces', subtitle: 'Agent workspace files and context' },
   docs: { title: 'Documentation', subtitle: 'Guides, references, and architecture docs' },
   activity: { title: 'Activity Log', subtitle: 'Cron runs, agent activity, and system events' },
+  costs: { title: 'Cost Explorer', subtitle: 'Org-wide spend analytics and per-agent breakdowns' },
   settings: { title: 'Settings', subtitle: 'Configuration, API keys, and system preferences' },
 };
 
@@ -202,6 +204,12 @@ export function ModeRouter() {
         return (
           <PageShell title={PAGE_META.activity.title} subtitle={PAGE_META.activity.subtitle}>
             <ActivityLog />
+          </PageShell>
+        );
+      case 'costs':
+        return (
+          <PageShell title={PAGE_META.costs.title} subtitle={PAGE_META.costs.subtitle}>
+            <CostExplorer />
           </PageShell>
         );
       case 'settings':

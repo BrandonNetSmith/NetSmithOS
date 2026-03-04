@@ -73,7 +73,7 @@ export interface Alert {
   jobId?: string;
 }
 
-export type AppMode = "bridge" | "drill" | "forge" | "health" | "activity" | "org" | "tasks" | "standup" | "workspaces" | "docs" | "settings";
+export type AppMode = "bridge" | "drill" | "forge" | "health" | "activity" | "org" | "tasks" | "standup" | "workspaces" | "docs" | "costs" | "settings";
 
 export interface ModelInfo {
   key: string;
