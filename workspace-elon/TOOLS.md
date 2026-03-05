@@ -3,7 +3,7 @@
 ## Environment
 - Host: SteelClaw (Ubuntu 24.04 Desktop VM on Proxmox, 192.168.50.55)
 - Data Server: Debian VM on Proxmox (100.117.179.87) — Docker host for all services
-- Model: anthropic/claude-sonnet-4-6 (via OpenRouter)
+- Model: anthropic/claude-opus-4-6 (via OpenRouter)
 - Workspace: ~/steelclaw/workspace-elon/
 
 ## Infrastructure Stack

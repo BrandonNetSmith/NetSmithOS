@@ -3,32 +3,31 @@ import { api } from "../api/client";
 import { useSSE } from "../hooks/useSSE";
 import { TopBar } from "./TopBar";
 import { HexGrid } from "./HexGrid";
-import type { Agent, CostSummary, Alert } from "../api/types";
-import { ChatPanel } from "./ChatPanel";
+import type { Agent, AppMode, CostSummary, Alert } from "../api/types";
 import "../styles/bridge.css";
 
 interface BridgeViewProps {
+  agents: Agent[];
   onDrill: (agentId: string) => void;
   onForge: () => void;
+  onNavigate: (mode: AppMode) => void;
+  onChatToggle: () => void;
 }
 
-export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
-  const [agents, setAgents] = useState<Agent[]>([]);
+export function BridgeView({ agents: externalAgents, onDrill, onForge, onNavigate, onChatToggle }: BridgeViewProps) {
   const [costs, setCosts] = useState<CostSummary | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [gatewayOnline, setGatewayOnline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
 
-  // Initial data fetch
+  // Initial data fetch (costs, health, alerts only — agents come from ModeRouter)
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const [agentsRes, costsRes, healthRes, alertsRes] = await Promise.allSettled([
-          api.getAgents(),
+        const [costsRes, healthRes, alertsRes] = await Promise.allSettled([
           api.getCostSummary(),
           api.getHealth(),
           api.getAlerts(),
@@ -36,7 +35,6 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
 
         if (cancelled) return;
 
-        if (agentsRes.status === "fulfilled") setAgents(agentsRes.value);
         if (costsRes.status === "fulfilled") setCosts(costsRes.value);
         if (healthRes.status === "fulfilled") {
           setGatewayOnline(healthRes.value.gateway === "online");
@@ -56,16 +54,14 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
     return () => { cancelled = true; };
   }, []);
 
-  // Periodic refresh as fallback (every 15s)
+  // Periodic refresh for costs/alerts (every 15s)
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const [agentsRes, costsRes, alertsRes] = await Promise.allSettled([
-          api.getAgents(),
+        const [costsRes, alertsRes] = await Promise.allSettled([
           api.getCostSummary(),
           api.getAlerts(),
         ]);
-        if (agentsRes.status === "fulfilled") setAgents(agentsRes.value);
         if (costsRes.status === "fulfilled") setCosts(costsRes.value);
         if (alertsRes.status === "fulfilled") setAlerts(alertsRes.value);
       } catch { /* silent fail */ }
@@ -74,37 +70,14 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
     return () => clearInterval(interval);
   }, []);
 
-  // SSE real-time updates — backend sends types: "agents", "costs", "alerts"
+  // SSE real-time updates
   const handleSSE = useCallback((type: string, data: any) => {
     switch (type) {
-      case "agents":
-        if (Array.isArray(data)) {
-          // SSE sends grouped agent summaries, merge with current state
-          setAgents((prev) => {
-            if (prev.length === 0) return prev;
-            return prev.map((agent) => {
-              const update = data.find((d: any) => d.agentId === agent.agentId);
-              if (!update) return agent;
-              return {
-                ...agent,
-                sessionCount: update.sessionCount ?? agent.sessionCount,
-                lastActivity: update.latestSession?.updatedAt ?? agent.lastActivity,
-                totalTokens: update.latestSession?.totalTokens ?? agent.totalTokens,
-                model: update.latestSession?.model ?? agent.model,
-              };
-            });
-          });
-        }
-        break;
       case "costs":
-        if (data && typeof data === "object") {
-          setCosts(data as CostSummary);
-        }
+        if (data && typeof data === "object") setCosts(data as CostSummary);
         break;
       case "alerts":
-        if (Array.isArray(data)) {
-          setAlerts(data as Alert[]);
-        }
+        if (Array.isArray(data)) setAlerts(data as Alert[]);
         break;
       case "connected":
         console.log("SSE connected to NetSmith gateway");
@@ -133,7 +106,7 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
     );
   }
 
-  if (error && agents.length === 0) {
+  if (error && externalAgents.length === 0) {
     return (
       <div className="bridge-view bridge-error">
         <div className="error-content">
@@ -153,14 +126,15 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
   return (
     <div className="bridge-view">
       <TopBar
-        agents={agents}
+        agents={externalAgents}
         costs={costs}
         alerts={alerts}
         gatewayOnline={gatewayOnline}
+        onNavigate={onNavigate}
       />
 
       <div className="bridge-main">
-        <HexGrid agents={agents} onDrill={onDrill} />
+        <HexGrid agents={externalAgents} onDrill={onDrill} />
       </div>
 
       <footer className="bottom-bar">
@@ -168,25 +142,19 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
           <span className="btn-icon">&#x2692;</span>
           Forge New Agent
         </button>
-        <button className="bottom-btn brief-btn" onClick={() => {}}>
+        <button className="bottom-btn brief-btn" onClick={() => onNavigate("activity")}>
           <span className="btn-icon">&#x2606;</span>
           Morning Brief
         </button>
-        <button className="bottom-btn cron-btn" onClick={() => {}}>
+        <button className="bottom-btn cron-btn" onClick={() => onNavigate("tasks")}>
           <span className="btn-icon">&#x23F0;</span>
           Cron Schedule
         </button>
-        <button className="bottom-btn chat-btn" onClick={() => setChatOpen(!chatOpen)}>
+        <button className="bottom-btn chat-btn" onClick={onChatToggle}>
           <span className="btn-icon">&#x1F4AC;</span>
-          {chatOpen ? "Close Chat" : "Command"}
+          Command
         </button>
       </footer>
-
-      <ChatPanel
-        agents={agents}
-        isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
-      />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, Component, type ReactNode } from 'react';
+import { useState, useEffect, Component, type ReactNode } from 'react';
 import { BridgeView } from '../bridge/BridgeView';
 import { DrillView } from '../drill/DrillView';
 import { ForgeView } from '../forge/ForgeView';
@@ -13,7 +13,10 @@ import Docs from '../pages/Docs';
 import ActivityLog from '../pages/ActivityLog';
 import CostExplorer from '../pages/CostExplorer';
 import SettingsStub from '../pages/SettingsStub';
-import type { AppMode } from '../api/types';
+import Boardroom from '../pages/Boardroom';
+import { ChatPanel } from '../bridge/ChatPanel';
+import { api } from '../api/client';
+import type { AppMode, Agent } from '../api/types';
 
 interface ErrorBoundaryProps {
   fallback: (error: Error, reset: () => void) => ReactNode;
@@ -53,11 +56,28 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   activity: { title: 'Activity Log', subtitle: 'Cron runs, agent activity, and system events' },
   costs: { title: 'Cost Explorer', subtitle: 'Org-wide spend analytics and per-agent breakdowns' },
   settings: { title: 'Settings', subtitle: 'Configuration, API keys, and system preferences' },
+  boardroom: { title: 'The Boardroom', subtitle: 'Executive council and agent oversight' },
 };
 
 export function ModeRouter() {
   const [mode, setMode] = useState<AppMode>('bridge');
   const [drillAgent, setDrillAgent] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [agents, setAgents] = useState<Agent[]>([]);
+
+  // Fetch agents globally with 15s refresh
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const data = await api.getAgents();
+        if (!cancelled) setAgents(data);
+      } catch { /* silent */ }
+    };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   const handleDrill = (agentId: string) => {
     setDrillAgent(agentId);
@@ -75,6 +95,8 @@ export function ModeRouter() {
     }
     setMode(newMode);
   };
+
+  const toggleChat = () => setChatOpen(prev => !prev);
 
   const errorFallback = (error: Error, reset: () => void) => (
     <div style={{
@@ -139,11 +161,19 @@ export function ModeRouter() {
   if (mode === 'drill' && drillAgent) {
     return (
       <ErrorBoundary fallback={errorFallback}>
-        <DrillView
-          agentId={drillAgent}
-          onBack={handleBack}
-          onAgentDeleted={handleBack}
-        />
+        <>
+          <DrillView
+            agentId={drillAgent}
+            onBack={handleBack}
+            onAgentDeleted={handleBack}
+          />
+          <ChatPanel agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+          {!chatOpen && (
+            <button className="chat-fab" onClick={toggleChat} title="Chat with agents">
+              <span style={{ fontSize: '24px' }}>💬</span>
+            </button>
+          )}
+        </>
       </ErrorBoundary>
     );
   }
@@ -153,8 +183,11 @@ export function ModeRouter() {
       case 'bridge':
         return (
           <BridgeView
+            agents={agents}
             onDrill={handleDrill}
             onForge={() => setMode('forge')}
+            onNavigate={handleNavigate}
+            onChatToggle={toggleChat}
           />
         );
       case 'forge':
@@ -173,19 +206,19 @@ export function ModeRouter() {
       case 'org':
         return (
           <PageShell title={PAGE_META.org.title} subtitle={PAGE_META.org.subtitle}>
-            <OrgChart />
+            <OrgChart onDrill={handleDrill} />
           </PageShell>
         );
       case 'tasks':
         return (
           <PageShell title={PAGE_META.tasks.title} subtitle={PAGE_META.tasks.subtitle}>
-            <TaskManager />
+            <TaskManager onNavigate={handleNavigate} />
           </PageShell>
         );
       case 'standup':
         return (
           <PageShell title={PAGE_META.standup.title} subtitle={PAGE_META.standup.subtitle}>
-            <Standup />
+            <Standup agents={agents} />
           </PageShell>
         );
       case 'workspaces':
@@ -218,11 +251,20 @@ export function ModeRouter() {
             <SettingsStub />
           </PageShell>
         );
+      case 'boardroom':
+        return (
+          <PageShell title={PAGE_META.boardroom.title} subtitle={PAGE_META.boardroom.subtitle}>
+            <Boardroom agents={agents} onDrill={handleDrill} />
+          </PageShell>
+        );
       default:
         return (
           <BridgeView
+            agents={agents}
             onDrill={handleDrill}
             onForge={() => setMode('forge')}
+            onNavigate={handleNavigate}
+            onChatToggle={toggleChat}
           />
         );
     }
@@ -236,6 +278,12 @@ export function ModeRouter() {
           {renderContent()}
         </div>
       </div>
+      <ChatPanel agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+      {!chatOpen && (
+        <button className="chat-fab" onClick={toggleChat} title="Chat with agents">
+          <span style={{ fontSize: '24px' }}>💬</span>
+        </button>
+      )}
     </ErrorBoundary>
   );
 }

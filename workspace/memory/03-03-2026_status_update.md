@@ -1,0 +1,1 @@
+Memory system and sub-agent model issues resolved as of 2026-03-03 15:13 EST. Brandon has instructed me to test memory and attempt delegation to Elon. Tim's model: openrouter/google/gemini-2.5-flash. Elon's model: openrouter/anthropic/claude-sonnet-4-6 (as per AGENTS.md and openclaw.json).

@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm'
 
 interface Agent {
   name: string
+  key: string
   tagline: string
-  path: string
   avatar: string
 }
 
@@ -17,15 +17,15 @@ interface FileInfo {
 
 const agents: Agent[] = [
   {
-    name: 'Tim',
+    name: 'Tim (Main)',
+    key: 'main',
     tagline: 'COO • Primary Operations',
-    path: '/home/brandon/steelclaw/workspace/',
     avatar: '🧠'
   },
   {
-    name: 'Calvin',
+    name: 'Clay',
+    key: 'clay',
     tagline: 'Community Agent • Discord Support',
-    path: '/home/brandon/steelclaw/workspace-calvin/',
     avatar: '🦞'
   }
 ]
@@ -50,12 +50,12 @@ export default function Workspaces() {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/workspace/${selectedAgent.name}/files`)
+      const res = await fetch(`/api/workspace/${selectedAgent.key}/files`)
       if (!res.ok) throw new Error('Failed to load files')
-      
+
       const data = await res.json()
       setFiles(data.files || [])
-      setWorkspacePath(data.path || selectedAgent.path)
+      setWorkspacePath(data.path || '')
       setSelectedFile(null)
       setFileContent('')
       setMode('preview')
@@ -72,9 +72,9 @@ export default function Workspaces() {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/workspace/${selectedAgent.name}/file?path=${encodeURIComponent(file.path)}`)
+      const res = await fetch(`/api/workspace/${selectedAgent.key}/file?path=${encodeURIComponent(file.path)}`)
       if (!res.ok) throw new Error('Failed to load file')
-      
+
       const data = await res.json()
       setSelectedFile(file)
       setFileContent(data.content)
@@ -90,21 +90,20 @@ export default function Workspaces() {
 
   const handleSave = async () => {
     if (!selectedFile) return
-    
+
     setIsSaving(true)
     setError(null)
     try {
-      const res = await fetch(`/api/workspace/${selectedAgent.name}/file?path=${encodeURIComponent(selectedFile.path)}`, {
+      const res = await fetch(`/api/workspace/${selectedAgent.key}/file?path=${encodeURIComponent(selectedFile.path)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContent })
       })
-      
+
       if (!res.ok) throw new Error('Failed to save file')
-      
+
       setFileContent(editContent)
       setMode('preview')
-      // Refresh file list to update sizes
       loadFiles()
     } catch (err) {
       console.error('Failed to save file:', err)
@@ -121,8 +120,8 @@ export default function Workspaces() {
           <div className="sidebar-section-title">Agents</div>
           {agents.map((agent) => (
             <div
-              key={agent.name}
-              className={`sidebar-item ${selectedAgent.name === agent.name ? 'active' : ''}`}
+              key={agent.key}
+              className={`sidebar-item ${selectedAgent.key === agent.key ? 'active' : ''}`}
               onClick={() => setSelectedAgent(agent)}
             >
               <span style={{ marginRight: '8px' }}>{agent.avatar}</span>
@@ -158,8 +157,8 @@ export default function Workspaces() {
 
       <div className="panel-main">
         {error && (
-          <div style={{ 
-            background: 'rgba(239, 68, 68, 0.15)', 
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.15)',
             border: '1px solid rgba(239, 68, 68, 0.3)',
             borderRadius: 'var(--radius-md)',
             padding: '12px 16px',
@@ -175,7 +174,7 @@ export default function Workspaces() {
           <div className="workspace-info">
             <h2>{selectedAgent.avatar} {selectedAgent.name}</h2>
             <div className="workspace-tagline">{selectedAgent.tagline}</div>
-            <div className="workspace-path">{workspacePath || selectedAgent.path}</div>
+            <div className="workspace-path">{workspacePath}</div>
           </div>
         </div>
 

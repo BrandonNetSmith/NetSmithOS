@@ -12,9 +12,9 @@ const docs: DocSection[] = [
   {
     id: 'overview',
     title: 'Overview',
-    content: `# What is NetSmithOS?
+    content: `# What is Muddy OS?
 
-NetSmithOS is the operational dashboard and control center for SteelClaw's AI agent infrastructure. It provides a unified interface for managing, monitoring, and coordinating multiple AI agents working together as a virtual executive team.
+Muddy OS is the operational dashboard and control center for SteelClaw's AI agent infrastructure. It provides a unified interface for managing, monitoring, and coordinating multiple AI agents working together as a virtual executive team.
 
 ## Key Features
 
@@ -128,8 +128,8 @@ Browse and edit agent workspace files.
 ## Agent Workspaces
 
 Each agent has a dedicated workspace directory:
-- **Tim**: \`~/steelclaw/workspace/\`
-- **Calvin**: \`~/steelclaw/workspace-calvin/\`
+- **Tim (Main)**: \`~/steelclaw/workspace/\`
+- **Clay**: \`~/steelclaw/workspace-clay/\`
 
 ## Core Files
 
@@ -283,43 +283,6 @@ Standups follow a standard format:
 - **Updates**: Yesterday / Today / Blockers per agent
 - **Action Items**: Tasks assigned
 - **Next Meeting**: Scheduled follow-up`
-  },
-  {
-    id: 'partnership-pipeline',
-    title: 'Partnership Pipeline',
-    content: `# Partnership Pipeline
-
-Managing business development and partnerships.
-
-## Pipeline Stages
-
-1. **Prospecting**: Identifying potential partners
-2. **Outreach**: Initial contact and introduction
-3. **Discovery**: Understanding mutual fit
-4. **Proposal**: Formal partnership terms
-5. **Negotiation**: Finalizing details
-6. **Closed**: Partnership active
-
-## Tracking
-
-Partnerships can be tracked in:
-- Dedicated \`partnerships.md\` file
-- CRM integration (when configured)
-- Standup updates from relevant agents
-
-## Agent Roles
-
-- **CMO (Gary)**: Marketing partnerships, co-marketing
-- **CRO (Warren)**: Revenue partnerships, sales channels
-- **COO (Tim)**: Operational partnerships, integrations
-
-## Templates
-
-Calvin maintains outreach templates for:
-- Cold introductions
-- Warm referrals
-- Follow-up sequences
-- Partnership proposals`
   },
   {
     id: 'memory-architecture',

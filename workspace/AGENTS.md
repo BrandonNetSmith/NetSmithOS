@@ -30,7 +30,7 @@ CEO: Brandon (human)
         ├── CRO: Warren 💰
         │   Revenue & Community & Partnerships
         │   Model: Claude Sonnet 4.6 | Status: Active
-        │   └── Community Agent: Calvin 🦞
+        │   └── Community Agent: Clay 🦞
         │         Discord Community Support
         │         Model: Gemini 2.5 Flash | Status: Active
         │
@@ -46,12 +46,12 @@ CEO: Brandon (human)
 | Name   | Role                  | Model                | Status  | Workspace                          |
 |--------|-----------------------|----------------------|---------|------------------------------------|
 | Tim    | COO                   | Gemini 2.5 Flash     | Active  | ~/steelclaw/workspace/             |
-| Elon   | CTO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-elon/        |
-| Gary   | CMO                   | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-gary/        |
+| Elon   | CTO                   | Claude Opus 4.6      | Active  | ~/steelclaw/workspace-elon/        |
+| Gary   | CMO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-gary/        |
 | Noah   | Social Media Manager  | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-noah/        |
-| Warren | CRO                   | Gemini 2.5 Flash    | Active  | ~/steelclaw/workspace-warren/      |
-| Steve  | CPO                   | Claude Opus 4.6    | Active  | ~/steelclaw/workspace-steve/       
-| Calvin | Community Agent       | Gemini 2.5 Flash     | Active  | ~/steelclaw/workspace-calvin/      |
+| Warren | CRO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-warren/      |
+| Steve  | CPO                   | Claude Sonnet 4.6    | Active  | ~/steelclaw/workspace-steve/       
+| Clay   | Community Agent       | Gemini 2.0 Flash     | Active  | ~/steelclaw/workspace-clay/        |
 
 ---
 
@@ -60,16 +60,16 @@ CEO: Brandon (human)
 ```
 Tim (Gemini Flash) ──── cheap, constant, routes everything
     │
-    ├── CTO Elon (Sonnet) ── smart, delegates code
+    ├── CTO Elon (Opus) ── smart, delegates code
     │       └── Coding sub-agent (Opus 4.6) ── spawned per task
     │
     ├── CMO Gary (Sonnet) ── delegates content/creative
     │       └── Creative sub-agent (per tool) ── spawned per task
     │
     ├── CRO Warren (Sonnet)
-    │       └── Calvin (Gemini Flash) ── community chat
+    │       └── Clay (Gemini Flash) ── community chat
     │
-    └── CPO Steve (Opus)
+    └── CPO Steve (Sonnet)
 ```
 
 ## Delegation Rules
@@ -77,7 +77,7 @@ Tim (Gemini Flash) ──── cheap, constant, routes everything
 - Tim delegates coding tasks to Elon, who spawns coding sub-agents
 - Elon owns backend/infra decisions and spawns coding sub-agents for implementation
 - Gary owns content and distribution; Noah handles social media execution
-- Warren owns community growth and revenue; Calvin handles Discord
+- Warren owns community growth and revenue; Clay handles Discord
 - Steve owns product vision and UX roadmap
 - Brandon has final decision on all strategy
 - Sub-agents (coding, creative) are ephemeral — spawned per task, die on completion
@@ -85,3 +85,10 @@ Tim (Gemini Flash) ──── cheap, constant, routes everything
 ---
 
 Last updated: 2026-03-1
+
+## Delegation Note
+When delegating tasks to sub-agents, NEVER specify the model ID explicitly.
+Just address the agent by name — "Elon, investigate X" — without a model parameter.
+OpenClaw automatically uses the correct model from openclaw.json.
+Specifying model IDs is infrastructure configuration. Per SOUL.md Infrastructure Rules,
+that is Brandon's domain. Never pass a model parameter when spawning sub-agents.

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="bg-noah" cx="40%" cy="35%">
+      <stop offset="0%" stop-color="#8b5cf644"/>
+      <stop offset="100%" stop-color="#8b5cf611"/>
+    </radialGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="100" fill="#8b5cf622"/>
+  <circle cx="100" cy="100" r="96" fill="url(#bg-noah)" stroke="#8b5cf666" stroke-width="2"/>
+  
+  <!-- Face circle -->
+  <circle cx="100" cy="90" r="52" fill="#8b5cf633" stroke="#8b5cf688" stroke-width="1.5"/>
+  
+  <!-- Eyes -->
+  <ellipse cx="84" cy="82" rx="5" ry="6" fill="#8b5cf6"/>
+  <ellipse cx="116" cy="82" rx="5" ry="6" fill="#8b5cf6"/>
+  
+  <!-- Smile -->
+  <path d="M82 100 Q100 116 118 100" stroke="#8b5cf6" stroke-width="3" fill="none" stroke-linecap="round"/>
+  
+  <!-- Initials -->
+  <text x="100" y="158" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700" fill="#8b5cf6">Noah</text>
+  
+  <!-- Small color accent at top -->
+  <circle cx="100" cy="100" r="96" fill="none" stroke="#8b5cf6" stroke-width="3" opacity="0.4"/>
+</svg>

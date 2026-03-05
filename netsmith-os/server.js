@@ -468,39 +468,91 @@ app.get('/api/standups/:filename', async (req, res) => {
 });
 
 // Create new standup
+const standupStreamClients = new Map(); // id -> Set<res>
+
 app.post('/api/standups', async (req, res) => {
-  const { topic } = req.body;
+  const { topic, agents: requestedAgents } = req.body;
   const today = new Date().toISOString().split('T')[0];
+  const standupId = `${today}-${Date.now()}`;
   const filename = `${today}-standup.md`;
   const filePath = join(STANDUPS_DIR, filename);
 
-  const content = `# Executive Standup - ${formatDate(today)}
-
-## Topic
-${topic}
-
-## Attendees
-- **Brandon** (CEO) 👤
-- **Tim** (COO) 🧠
-- **Calvin** (Community Agent) 🦞
-
----
-
-*Standup initiated. Awaiting agent responses...*
-
----
-
-## Notes
-
-`;
+  // Determine attendee agent IDs
+  const attendees = Array.isArray(requestedAgents) && requestedAgents.length > 0
+    ? requestedAgents
+    : ['main'];
 
   try {
     await mkdir(STANDUPS_DIR, { recursive: true });
-    await writeFile(filePath, content, 'utf-8');
-    res.json({ success: true, filename, content });
+    const header = `# Executive Standup - ${formatDate(today)}\n\n## Topic\n${topic}\n\n## Attendees\n${attendees.map(id => `- ${AGENT_META[id]?.name || id}`).join('\n')}\n\n---\n\n`;
+    await writeFile(filePath, header, 'utf-8');
+
+    // Return immediately with ID so client can connect to SSE stream
+    res.json({ success: true, id: standupId, filename, content: header });
+
+    // Run async orchestration
+    runStandupOrchestration(standupId, topic, attendees, filePath).catch(err => {
+      console.error('Standup orchestration error:', err);
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create standup', details: err.message });
   }
+});
+
+async function runStandupOrchestration(standupId, topic, attendees, filePath) {
+  const broadcast = (evt) => {
+    const payload = 'data: ' + JSON.stringify(evt) + '\n\n';
+    const clients = standupStreamClients.get(standupId);
+    if (clients) for (const c of clients) { try { c.write(payload); } catch {} }
+  };
+
+  const responses = [];
+  for (const agentId of attendees) {
+    const meta = AGENT_META[agentId];
+    if (!meta) continue;
+    broadcast({ type: 'thinking', agentId, agentName: meta.name });
+    try {
+      const prompt = responses.length === 0
+        ? `Topic: ${topic}\n\nPlease give your standup update. Be concise — 2-4 sentences covering what you're working on, any blockers, and your priorities.`
+        : `Topic: ${topic}\n\nPrior updates:\n${responses.map(r => `**${r.name}**: ${r.text}`).join('\n\n')}\n\nPlease give your standup update building on what others said.`;
+      const { stdout } = await execFileAsync('openclaw', ['agent', '--agent', agentId, '--message', prompt, '--json', '--timeout', '90'], { timeout: 100000, maxBuffer: 5*1024*1024 });
+      let responseText = stdout.trim();
+      try {
+        const parsed = JSON.parse(stdout);
+        if (parsed.result?.payloads?.[0]) responseText = parsed.result.payloads[0].text || responseText;
+        else if (parsed.response) responseText = parsed.response;
+      } catch {}
+      responses.push({ agentId, name: meta.name, text: responseText });
+      broadcast({ type: 'response', agentId, agentName: meta.name, content: responseText });
+      await writeFile(filePath, `## ${meta.name} (${meta.role})\n\n${responseText}\n\n---\n\n`, { flag: 'a' });
+    } catch (err) {
+      broadcast({ type: 'error', agentId, agentName: meta?.name || agentId, content: `Failed to get response: ${err.message}` });
+    }
+  }
+
+  // Write summary placeholder
+  await writeFile(filePath, `## Summary\n\n*Standup complete — ${attendees.length} agents participated.*\n`, { flag: 'a' });
+  broadcast({ type: 'complete', standupId, summary: `Standup complete with ${attendees.length} agents.` });
+
+  // Cleanup clients after 60s
+  setTimeout(() => standupStreamClients.delete(standupId), 60000);
+}
+
+app.get('/api/standups/stream/:id', (req, res) => {
+  const { id } = req.params;
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write('data: ' + JSON.stringify({ type: 'connected', id }) + '\n\n');
+  if (!standupStreamClients.has(id)) standupStreamClients.set(id, new Set());
+  standupStreamClients.get(id).add(res);
+  req.on('close', () => {
+    const clients = standupStreamClients.get(id);
+    if (clients) { clients.delete(res); if (clients.size === 0) standupStreamClients.delete(id); }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1931,6 +1983,15 @@ app.post('/api/chat', express.json(), async (req, res) => {
       }
     }
 
+    // Broadcast to thought stream clients watching this agent
+    const tsClients = thoughtStreamClients.get(agentId);
+    if (tsClients && tsClients.size > 0) {
+      const userThought = { type: 'thought', agentId, ts: Date.now(), level: 'info', event: 'chat-input', message: `[Chat] User: ${message.slice(0, 300)}`, model: null, toolName: null, toolInput: null, tokens: null, sessionId: null };
+      const agentThought = { type: 'thought', agentId, ts: Date.now(), level: 'info', event: 'chat-response', message: `[Chat] ${meta.name}: ${responseText.slice(0, 400)}`, model, toolName: null, toolInput: null, tokens, sessionId: null };
+      const p1 = 'data: ' + JSON.stringify(userThought) + '\n\n';
+      const p2 = 'data: ' + JSON.stringify(agentThought) + '\n\n';
+      for (const client of tsClients) { try { client.write(p1); client.write(p2); } catch {} }
+    }
     res.json({
       agentId,
       agentName: meta.name,

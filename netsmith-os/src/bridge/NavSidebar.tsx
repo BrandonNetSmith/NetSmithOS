@@ -8,6 +8,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { mode: 'bridge', icon: '⬡', label: 'Bridge' },
+  { mode: 'boardroom', icon: '🏛', label: 'Boardroom' },
   { mode: 'health', icon: '🖥', label: 'Health' },
   { mode: 'org', icon: '👥', label: 'Org Chart' },
   { mode: 'tasks', icon: '⚡', label: 'Tasks' },
