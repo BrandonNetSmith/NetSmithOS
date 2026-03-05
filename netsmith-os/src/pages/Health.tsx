@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { api } from '../api/client'
 
 interface HealthData {
   cpu: {
@@ -35,6 +36,12 @@ interface HealthData {
     nodeVersion: string
   }
   timestamp: string
+}
+
+interface MetricsHistory {
+  cpu: number[]
+  memory: number[]
+  timestamps: number[]
 }
 
 function formatBytes(bytes: number): string {
@@ -81,8 +88,144 @@ function StatusDot({ status }: { status: string }) {
   )
 }
 
+// ─── Sparkline Component ────────────────────────────────────────────────────
+interface SparklineProps {
+  data: number[]
+  color: string
+  label: string
+  gradientId: string
+}
+
+function Sparkline({ data, color, label, gradientId }: SparklineProps) {
+  const SVG_WIDTH = 600
+  const SVG_HEIGHT = 64
+  const PADDING_TOP = 4
+  const PADDING_BOTTOM = 4
+
+  if (data.length < 2) {
+    return (
+      <div className="model-card" style={{ padding: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Collecting data…</span>
+        </div>
+        <div style={{
+          height: `${SVG_HEIGHT}px`,
+          background: 'var(--bg-tertiary)',
+          borderRadius: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--text-muted)',
+          fontSize: '12px',
+        }}>
+          ⏳ Waiting for samples
+        </div>
+      </div>
+    )
+  }
+
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const current = data[data.length - 1]
+
+  // Scale Y: 0-100% range with padding
+  const yRange = SVG_HEIGHT - PADDING_TOP - PADDING_BOTTOM
+  const scaleY = (val: number) => {
+    const clamped = Math.max(0, Math.min(100, val))
+    return PADDING_TOP + yRange - (clamped / 100) * yRange
+  }
+
+  const stepX = SVG_WIDTH / (data.length - 1)
+
+  // Build polyline points
+  const points = data.map((val, i) => `${i * stepX},${scaleY(val)}`).join(' ')
+
+  // Build fill polygon (close along the bottom)
+  const fillPoints = `0,${SVG_HEIGHT} ${points} ${(data.length - 1) * stepX},${SVG_HEIGHT}`
+
+  return (
+    <div className="model-card" style={{ padding: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</span>
+        <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
+          <span style={{ color: 'var(--text-muted)' }}>
+            Min <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{min}%</span>
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            Max <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{max}%</span>
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            Now <span style={{ color, fontWeight: 700 }}>{current}%</span>
+          </span>
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+        preserveAspectRatio="none"
+        style={{
+          width: '100%',
+          height: `${SVG_HEIGHT}px`,
+          display: 'block',
+          borderRadius: '6px',
+          background: 'var(--bg-tertiary)',
+        }}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {/* Horizontal reference lines at 25%, 50%, 75% */}
+        {[25, 50, 75].map((pct) => (
+          <line
+            key={pct}
+            x1="0"
+            y1={scaleY(pct)}
+            x2={SVG_WIDTH}
+            y2={scaleY(pct)}
+            stroke="rgba(255,255,255,0.06)"
+            strokeWidth="1"
+            strokeDasharray="4 4"
+          />
+        ))}
+        {/* Gradient fill */}
+        <polygon
+          points={fillPoints}
+          fill={`url(#${gradientId})`}
+        />
+        {/* Line */}
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {/* Current value dot */}
+        <circle
+          cx={(data.length - 1) * stepX}
+          cy={scaleY(current)}
+          r="3"
+          fill={color}
+          stroke="var(--bg-card)"
+          strokeWidth="1.5"
+        />
+      </svg>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <span>{data.length > 1 ? `${Math.round((data.length * 10) / 60)}m ago` : ''}</span>
+        <span>now</span>
+      </div>
+    </div>
+  )
+}
+
 export default function Health() {
   const [health, setHealth] = useState<HealthData | null>(null)
+  const [history, setHistory] = useState<MetricsHistory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState(new Date())
 
@@ -95,10 +238,21 @@ export default function Health() {
   const loadHealth = async () => {
     try {
       setError(null)
-      const res = await fetch('/api/health')
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const data = await res.json()
-      setHealth(data)
+      const [healthRes, historyRes] = await Promise.allSettled([
+        fetch('/api/health').then(r => { if (!r.ok) throw new Error(`API returned ${r.status}`); return r.json() }),
+        api.getHealthHistory(),
+      ])
+
+      if (healthRes.status === 'fulfilled') {
+        setHealth(healthRes.value)
+      } else {
+        throw healthRes.reason
+      }
+
+      if (historyRes.status === 'fulfilled') {
+        setHistory(historyRes.value)
+      }
+
       setLastRefresh(new Date())
     } catch (err) {
       console.error('Failed to load health:', err)
@@ -232,6 +386,23 @@ export default function Health() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* System Pulse — sparkline history */}
+          <div className="section-title" style={{ marginTop: '28px' }}>📈 System Pulse</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <Sparkline
+              data={history?.cpu ?? []}
+              color="#10b981"
+              label="CPU Usage"
+              gradientId="sparkline-cpu-grad"
+            />
+            <Sparkline
+              data={history?.memory ?? []}
+              color="#3b82f6"
+              label="Memory Usage"
+              gradientId="sparkline-mem-grad"
+            />
           </div>
 
           {/* Services */}

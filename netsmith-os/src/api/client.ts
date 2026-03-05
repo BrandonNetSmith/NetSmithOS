@@ -17,6 +17,7 @@ async function fetchWithError(url: string, options: RequestInit): Promise<any> {
 
 export const api = {
   getHealth: () => fetchJSON<{ gateway: string; uptime: number; version: string; agentCount: number }>("/health"),
+  getHealthHistory: () => fetchJSON<{ cpu: number[]; memory: number[]; timestamps: number[] }>("/health/history"),
   getAgents: () => fetchJSON<Agent[]>("/agents"),
   getAgentSessions: (id: string) => fetchJSON<{ sessions: Session[] }>(`/agents/${id}/sessions`),
   getCostSummary: () => fetchJSON<CostSummary>("/costs/summary"),

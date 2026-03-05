@@ -65,7 +65,7 @@ const WORKSPACES = {
   'warren': join(HOME, 'steelclaw', 'workspace-warren'),
   'noah': join(HOME, 'steelclaw', 'workspace-noah'),
   'steve': join(HOME, 'steelclaw', 'workspace-steve'),
-  'calvin': join(HOME, 'steelclaw', 'workspace-calvin'),
+  'clay': join(HOME, 'steelclaw', 'workspace-clay'),
 };
 
 
@@ -78,7 +78,7 @@ const AGENT_META = {
   warren: { name: "Warren", role: "CRO", emoji: "💰" },
   steve: { name: "Steve", role: "CPO", emoji: "🎯" },
   noah: { name: "Noah", role: "SMM", emoji: "📱" },
-  calvin: { name: "Calvin", role: "Community", emoji: "🦞" },
+  clay: { name: "Clay", role: "Community", emoji: "🦞" },
 };
 
 // ─── Pricing data ───────────────────────────────────────────────────────────────
@@ -506,6 +506,60 @@ ${topic}
 // ═══════════════════════════════════════════════════════════════════════════════
 // NEW WAR ROOM ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── System Pulse: in-memory metrics history (10min rolling) ────────────────
+const METRICS_HISTORY = { cpu: [], memory: [], timestamps: [] };
+const MAX_SAMPLES = 60; // 60 samples × 10s = 10 minutes
+
+function sampleMetrics() {
+  try {
+    // CPU usage delta from /proc/stat
+    let cpuPct = 0;
+    try {
+      const cpuOut = execSync("grep '^cpu ' /proc/stat", { encoding: 'utf8', timeout: 2000 }).trim();
+      const parts = cpuOut.split(/\s+/).slice(1).map(Number);
+      const idle = parts[3] + (parts[4] || 0);
+      const total = parts.reduce((a, b) => a + b, 0);
+      if (global._lastCpuPulse) {
+        const dIdle = idle - global._lastCpuPulse.idle;
+        const dTotal = total - global._lastCpuPulse.total;
+        cpuPct = dTotal > 0 ? Math.round((1 - dIdle / dTotal) * 100) : 0;
+      }
+      global._lastCpuPulse = { idle, total };
+    } catch { cpuPct = 0; }
+
+    // Memory usage %
+    const totalMem = totalmem();
+    const freeMem = freemem();
+    const memPct = Math.round(((totalMem - freeMem) / totalMem) * 100);
+
+    METRICS_HISTORY.cpu.push(cpuPct);
+    METRICS_HISTORY.memory.push(memPct);
+    METRICS_HISTORY.timestamps.push(Date.now());
+
+    // Trim to circular buffer size
+    if (METRICS_HISTORY.cpu.length > MAX_SAMPLES) {
+      METRICS_HISTORY.cpu.shift();
+      METRICS_HISTORY.memory.shift();
+      METRICS_HISTORY.timestamps.shift();
+    }
+  } catch (err) {
+    console.error('Metrics sample error:', err.message);
+  }
+}
+
+// Sample immediately on startup, then every 10s
+sampleMetrics();
+setInterval(sampleMetrics, 10_000);
+
+// GET /api/health/history — rolling CPU & memory sparkline data
+app.get('/api/health/history', (req, res) => {
+  res.json({
+    cpu: [...METRICS_HISTORY.cpu],
+    memory: [...METRICS_HISTORY.memory],
+    timestamps: [...METRICS_HISTORY.timestamps],
+  });
+});
 
 // GET /api/health — Full system health (gateway + hardware + services)
 app.get('/api/health', async (req, res) => {
@@ -1489,6 +1543,126 @@ function formatDate(dateStr) {
   });
 }
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AI FLEET ENDPOINT — All AI capabilities grouped by type
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function modelCost(shortName) {
+  const s = (shortName || '').toLowerCase();
+  if (s.includes('opus')) return '$15/1M in · $75/1M out';
+  if (s.includes('sonnet')) return '$3/1M in · $15/1M out';
+  if (s.includes('haiku')) return '$0.25/1M in · $1.25/1M out';
+  if (s.includes('gpt-4o-mini')) return '$0.15/1M in · $0.60/1M out';
+  if (s.includes('gpt-4o')) return '$2.50/1M in · $10/1M out';
+  if (s.includes('gemini-2.5-pro')) return '$1.25/1M in · $10/1M out';
+  if (s.includes('gemini-2.5-flash')) return '$0.15/1M in · $0.60/1M out';
+  if (s.includes('gemini-2.0-flash')) return '$0.075/1M in · $0.30/1M out';
+  if (s.includes('dall-e')) return '$0.04/image';
+  if (s.includes('sora-2-pro')) return '$0.04/sec';
+  if (s.includes('sora-2')) return '$0.01/sec';
+  if (s.includes('whisper')) return '$0.006/min';
+  if (s.includes('tts-1-hd')) return '$30/1M chars';
+  if (s.includes('tts-1')) return '$15/1M chars';
+  if (s.includes('gpt-4o-audio')) return '$100/1M in';
+  if (s.includes('gemini-3-pro-image')) return '$0.04/image';
+  if (s.includes('gemini-2.5-flash-image')) return '$0.02/image';
+  return 'varies';
+}
+
+app.get('/api/fleet', async (req, res) => {
+  try {
+    const fleet = [];
+    const keys = {
+      anthropic: !!process.env.ANTHROPIC_API_KEY,
+      openai: !!process.env.OPENAI_API_KEY,
+      google: !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
+      openrouter: !!process.env.OPENROUTER_API_KEY,
+    };
+
+    const addAvailable = (name, shortName, purpose, auth, provider, type = 'LLM', cost = 'varies') => {
+      fleet.push({ name, shortName, purpose, provider, authMethod: auth, status: 'Available', agents: [], agentCount: 0, cost, type });
+    };
+
+    // Active LLM agents from openclaw.json
+    let agentsList = [];
+    try { agentsList = await getAgentsList(); } catch { /* ignore */ }
+    const activeAgentsByModel = {};
+    for (const agent of agentsList) {
+      const model = agent.model || 'openrouter/auto';
+      if (!activeAgentsByModel[model]) activeAgentsByModel[model] = [];
+      activeAgentsByModel[model].push(agent.id);
+    }
+    for (const [model, agents] of Object.entries(activeAgentsByModel)) {
+      const shortName = model.split('/').pop() || model;
+      const providerRaw = model.includes('anthropic') ? 'anthropic'
+        : (model.includes('google') || model.includes('gemini')) ? 'google'
+        : (model.includes('openai') || model.includes('gpt')) ? 'openai' : 'openrouter';
+      fleet.push({
+        name: model, shortName,
+        purpose: agents.map(a => AGENT_META[a]?.name || a).join(', '),
+        provider: providerRaw, authMethod: 'API key',
+        status: 'Active', agents, agentCount: agents.length,
+        cost: modelCost(shortName), type: 'LLM',
+      });
+    }
+
+    // Available LLMs (not yet assigned)
+    const activeModelSet = new Set(Object.keys(activeAgentsByModel));
+    const availableLLMs = [
+      { name: 'anthropic/claude-opus-4-5', short: 'claude-opus-4-5', purpose: 'Flagship reasoning model', provider: 'anthropic', needKey: 'anthropic' },
+      { name: 'anthropic/claude-sonnet-4-5', short: 'claude-sonnet-4-5', purpose: 'Balanced performance', provider: 'anthropic', needKey: 'anthropic' },
+      { name: 'anthropic/claude-haiku-4-5', short: 'claude-haiku-4-5', purpose: 'Fast & lightweight', provider: 'anthropic', needKey: 'anthropic' },
+      { name: 'openai/gpt-4o', short: 'gpt-4o', purpose: 'OpenAI flagship model', provider: 'openai', needKey: 'openai' },
+      { name: 'openai/gpt-4o-mini', short: 'gpt-4o-mini', purpose: 'Fast, affordable GPT', provider: 'openai', needKey: 'openai' },
+      { name: 'google/gemini-2.5-pro', short: 'gemini-2.5-pro', purpose: 'Google flagship model', provider: 'google', needKey: 'google' },
+      { name: 'google/gemini-2.5-flash', short: 'gemini-2.5-flash', purpose: 'Fast Gemini', provider: 'google', needKey: 'google' },
+      { name: 'openrouter/auto', short: 'openrouter-auto', purpose: 'Auto-routes to best model', provider: 'openrouter', needKey: 'openrouter' },
+    ];
+    for (const m of availableLLMs) {
+      if (!activeModelSet.has(m.name) && keys[m.needKey]) {
+        addAvailable(m.name, m.short, m.purpose, 'API key', m.provider, 'LLM', modelCost(m.short));
+      }
+    }
+
+    // Image models
+    if (keys.google) {
+      addAvailable('google/gemini-3-pro-image', 'gemini-3-pro-image', 'Image generation & editing (Nano Banana Pro)', 'API key', 'google', 'Image', '$0.04/image');
+      addAvailable('google/gemini-2.5-flash-image', 'gemini-2.5-flash-image', 'Fast image understanding & gen', 'API key', 'google', 'Image', '$0.02/image');
+    }
+    if (keys.openai) {
+      addAvailable('openai/dall-e-3', 'dall-e-3', 'High-quality text-to-image', 'API key', 'openai', 'Image', '$0.04/image');
+    }
+
+    // Video models
+    if (keys.openai) {
+      addAvailable('openai/sora-2', 'sora-2', 'Text-to-video generation', 'API key', 'openai', 'Video', '$0.01/sec');
+      addAvailable('openai/sora-2-pro', 'sora-2-pro', 'High-quality video generation', 'API key', 'openai', 'Video', '$0.04/sec');
+    }
+
+    // Audio models
+    if (keys.openai) {
+      addAvailable('openai/whisper-1', 'whisper-1', 'Speech-to-text transcription', 'API key', 'openai', 'Audio', '$0.006/min');
+      addAvailable('openai/tts-1', 'tts-1', 'Text-to-speech synthesis', 'API key', 'openai', 'Audio', '$15/1M chars');
+      addAvailable('openai/tts-1-hd', 'tts-1-hd', 'High-fidelity TTS', 'API key', 'openai', 'Audio', '$30/1M chars');
+      addAvailable('openai/gpt-4o-audio-preview', 'gpt-4o-audio', 'Audio reasoning & generation', 'API key', 'openai', 'Audio', '$100/1M in');
+    }
+
+    // Music (Locked — no key)
+    fleet.push({
+      name: 'suno/v4', shortName: 'suno-v4',
+      purpose: 'AI music generation', provider: 'suno',
+      authMethod: 'SUNO_API_KEY (not set)', status: 'Locked',
+      agents: [], agentCount: 0, cost: '$0.01/song', type: 'Music',
+    });
+
+    res.json({ fleet, keys });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to build fleet', details: err.message });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MANAGEMENT ENDPOINTS — Model, Thinking, Agent, Cron CRUD
