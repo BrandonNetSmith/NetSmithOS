@@ -4,6 +4,7 @@ import { useSSE } from "../hooks/useSSE";
 import { TopBar } from "./TopBar";
 import { HexGrid } from "./HexGrid";
 import type { Agent, CostSummary, Alert } from "../api/types";
+import { ChatPanel } from "./ChatPanel";
 import "../styles/bridge.css";
 
 interface BridgeViewProps {
@@ -18,6 +19,7 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
   const [gatewayOnline, setGatewayOnline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Initial data fetch
   useEffect(() => {
@@ -174,11 +176,17 @@ export function BridgeView({ onDrill, onForge }: BridgeViewProps) {
           <span className="btn-icon">&#x23F0;</span>
           Cron Schedule
         </button>
-        <button className="bottom-btn logs-btn" onClick={() => {}}>
-          <span className="btn-icon">&#x2263;</span>
-          Logs
+        <button className="bottom-btn chat-btn" onClick={() => setChatOpen(!chatOpen)}>
+          <span className="btn-icon">&#x1F4AC;</span>
+          {chatOpen ? "Close Chat" : "Command"}
         </button>
       </footer>
+
+      <ChatPanel
+        agents={agents}
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+      />
     </div>
   );
 }

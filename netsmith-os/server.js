@@ -9,7 +9,7 @@ import { readdir, readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
 import { join, resolve } from 'path';
 import { homedir, cpus, totalmem, freemem, hostname, platform, release, arch, uptime as osUptime } from 'os';
-import { execFile, execSync } from 'child_process';
+import { execFile, execSync, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
@@ -1867,6 +1867,250 @@ app.get('/api/agents/:id/config', async (req, res) => {
     res.status(500).json({ error: 'Failed to get agent config', details: err.message });
   }
 });
+
+// ─── CHAT — Send message to agent and get response ─────────────────────────
+
+app.post('/api/chat', express.json(), async (req, res) => {
+  const { agentId, message } = req.body;
+  if (!agentId || !message) {
+    return res.status(400).json({ error: 'agentId and message are required' });
+  }
+
+  const meta = AGENT_META[agentId];
+  if (!meta) {
+    return res.status(404).json({ error: `Unknown agent: ${agentId}` });
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync('openclaw', [
+      'agent',
+      '--agent', agentId,
+      '--message', message,
+      '--json',
+      '--timeout', '120'
+    ], { timeout: 130000, maxBuffer: 10 * 1024 * 1024 });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      parsed = null;
+    }
+
+    // Extract response text from openclaw JSON structure
+    let responseText = stdout.trim();
+    let model = null;
+    let tokens = null;
+
+    if (parsed) {
+      // openclaw agent --json nests data at result.payloads[0].text
+      if (parsed.result && parsed.result.payloads && parsed.result.payloads[0]) {
+        responseText = parsed.result.payloads[0].text || responseText;
+      } else if (parsed.response) {
+        responseText = parsed.response;
+      } else if (parsed.content) {
+        responseText = parsed.content;
+      } else if (parsed.text) {
+        responseText = parsed.text;
+      }
+
+      // Extract model from result.meta.agentMeta.model
+      if (parsed.result && parsed.result.meta && parsed.result.meta.agentMeta) {
+        model = parsed.result.meta.agentMeta.model || null;
+        const usage = parsed.result.meta.agentMeta.usage;
+        if (usage) {
+          tokens = {
+            input_tokens: usage.input || usage.input_tokens || 0,
+            output_tokens: usage.output || usage.output_tokens || 0,
+            total_tokens: usage.total || usage.total_tokens || 0,
+          };
+        }
+      } else {
+        model = parsed.model || null;
+        tokens = parsed.usage || null;
+      }
+    }
+
+    res.json({
+      agentId,
+      agentName: meta.name,
+      agentEmoji: meta.emoji,
+      response: responseText,
+      model,
+      tokens,
+      ts: Date.now(),
+    });
+  } catch (err) {
+    console.error(`Chat error (${agentId}):`, err.message);
+    if (err.stdout) {
+      try {
+        const partial = JSON.parse(err.stdout);
+        let errText = err.stdout.trim();
+        let errModel = null;
+        let errTokens = null;
+        if (partial.result && partial.result.payloads && partial.result.payloads[0]) {
+          errText = partial.result.payloads[0].text || errText;
+        } else {
+          errText = partial.response || partial.content || errText;
+        }
+        if (partial.result && partial.result.meta && partial.result.meta.agentMeta) {
+          errModel = partial.result.meta.agentMeta.model || null;
+          const u = partial.result.meta.agentMeta.usage;
+          if (u) errTokens = { input_tokens: u.input || 0, output_tokens: u.output || 0, total_tokens: u.total || 0 };
+        }
+        return res.json({
+          agentId,
+          agentName: meta.name,
+          agentEmoji: meta.emoji,
+          response: errText,
+          model: errModel,
+          tokens: errTokens,
+          ts: Date.now(),
+          warning: 'Response may be incomplete (timeout)',
+        });
+      } catch {}
+    }
+    res.status(500).json({
+      error: 'Chat failed',
+      details: err.message,
+    });
+  }
+});
+
+// ─── THOUGHT STREAM — SSE streaming agent activity from gateway logs ─────────
+
+const thoughtStreamClients = new Map();
+
+app.get('/api/agents/:id/stream', (req, res) => {
+  const { id } = req.params;
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write('data: ' + JSON.stringify({ type: 'connected', agentId: id, ts: Date.now() }) + '\n\n');
+
+  if (!thoughtStreamClients.has(id)) {
+    thoughtStreamClients.set(id, new Set());
+  }
+  thoughtStreamClients.get(id).add(res);
+
+  ensureLogTail(id);
+
+  req.on('close', () => {
+    const clients = thoughtStreamClients.get(id);
+    if (clients) {
+      clients.delete(res);
+      if (clients.size === 0) {
+        thoughtStreamClients.delete(id);
+        stopLogTail(id);
+      }
+    }
+  });
+});
+
+const logTailProcesses = new Map();
+
+function ensureLogTail(agentId) {
+  if (logTailProcesses.has(agentId)) return;
+
+  
+  const proc = spawn('openclaw', ['logs', '--follow', '--json', '--interval', '2000'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env },
+  });
+
+  let buffer = '';
+
+  proc.stdout.on('data', (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+
+        // Skip meta entries (log cursor info, session lists)
+        const entryType = entry.type || entry.event || '';
+        if (entryType === 'meta' || entryType === 'cursor') continue;
+
+        // Filter by agent — skip entries for other agents
+        const entryAgent = entry.agentId || entry.agent || entry.sessionAgent || '';
+        if (entryAgent && entryAgent !== agentId) continue;
+
+        // Build the raw message string
+        let msg = entry.message || entry.msg || entry.text || '';
+        if (typeof msg !== 'string') msg = JSON.stringify(msg);
+
+        // Skip noisy gateway internal dumps:
+        // - Session list periodic dumps (contain sessions.json path)
+        // - Full run result echoes (contain runId + payloads)
+        // - Log tail notices
+        const msgTrim = msg.slice(0, 200);
+        if (msgTrim.includes('sessions.json') || msgTrim.includes('sessions/sessions')) continue;
+        if (msgTrim.includes('"runId"') && msgTrim.includes('"payloads"')) continue;
+        if (msgTrim.includes('"runId"') && msgTrim.includes('"result"')) continue;
+        if (msg.includes('Log tail truncated')) continue;
+
+        // Skip empty messages
+        if (!msg.trim()) continue;
+
+        // Truncate long messages
+        if (msg.length > 500) msg = msg.slice(0, 500) + '...';
+
+        const thought = {
+          type: 'thought',
+          agentId,
+          ts: entry.ts || entry.timestamp || Date.now(),
+          level: entry.level || 'info',
+          event: entry.event || entryType || 'log',
+          message: msg,
+          model: entry.model || null,
+          toolName: entry.toolName || entry.tool || null,
+          toolInput: entry.toolInput ? (typeof entry.toolInput === 'string' ? entry.toolInput : JSON.stringify(entry.toolInput)).slice(0, 300) : null,
+          tokens: entry.tokens || entry.usage || null,
+          sessionId: entry.sessionId || entry.session || null,
+        };
+
+        const clients = thoughtStreamClients.get(agentId);
+        if (clients) {
+          const payload = 'data: ' + JSON.stringify(thought) + '\n\n';
+          for (const client of clients) {
+            try { client.write(payload); } catch {}
+          }
+        }
+      } catch {}
+    }
+  });
+
+  proc.stderr.on('data', (chunk) => {
+    console.warn('Log tail stderr (' + agentId + '):', chunk.toString().trim());
+  });
+
+  proc.on('close', (code) => {
+    logTailProcesses.delete(agentId);
+    if (thoughtStreamClients.has(agentId) && thoughtStreamClients.get(agentId).size > 0) {
+      setTimeout(() => ensureLogTail(agentId), 3000);
+    }
+  });
+
+  logTailProcesses.set(agentId, proc);
+}
+
+function stopLogTail(agentId) {
+  const proc = logTailProcesses.get(agentId);
+  if (proc) {
+    try { proc.kill('SIGTERM'); } catch {}
+    logTailProcesses.delete(agentId);
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // START SERVER
 // ═══════════════════════════════════════════════════════════════════════════════

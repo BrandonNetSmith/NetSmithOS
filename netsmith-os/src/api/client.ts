@@ -54,3 +54,16 @@ export const api = {
   createCronJob: (input: CronCreateInput) =>
     fetchWithError(`${BASE}/cron/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }),
 };
+
+// ─── Chat API ───────────────────────────────────────────────────────────────
+
+export async function sendChat(agentId: string, message: string): Promise<import("./types").ChatResponse> {
+  const r = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agentId, message }),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.details || data.error || `Chat failed: ${r.status}`);
+  return data;
+}

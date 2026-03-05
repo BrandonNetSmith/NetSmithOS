@@ -7,6 +7,7 @@ import { CronPanel } from "./CronPanel";
 import { FilePanel } from "./FilePanel";
 import { AgentControlBar } from "./AgentControlBar";
 import type { Agent, Session } from "../api/types";
+import { ThoughtStreamPanel } from "./ThoughtStreamPanel";
 import "../styles/drill.css";
 
 interface DrillViewProps {
@@ -133,55 +134,9 @@ export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
         <CostPanel agentId={agentId} />
         <CronPanel agentId={agentId} />
         <FilePanel agentId={agentId} />
-        {/* 6th panel: Agent workspace overview */}
-        <div className="drill-panel">
-          <div className="drill-panel-header">
-            <span className="drill-panel-title">Agent Info</span>
-          </div>
-          <div className="drill-panel-body">
-            <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Agent ID
-                </span>
-                <div style={{ color: "var(--accent-primary)", marginTop: 2 }}>{agentId}</div>
-              </div>
-              <div>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Model
-                </span>
-                <div style={{ color: "var(--accent-gold)", marginTop: 2 }}>
-                  {agent?.model || "Not set"}
-                </div>
-              </div>
-              <div>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Total Tokens
-                </span>
-                <div style={{ marginTop: 2 }}>
-                  {agent?.totalTokens?.toLocaleString() || "0"}
-                </div>
-              </div>
-              <div>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Sessions
-                </span>
-                <div style={{ marginTop: 2 }}>
-                  {agent?.sessionCount || 0}
-                </div>
-              </div>
-              <div>
-                <span style={{ color: "var(--text-secondary)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                  Workspace
-                </span>
-                <div style={{ color: "var(--text-secondary)", marginTop: 2 }}>
-                  {agent?.workspace || "None"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+        {/* 6th panel: Thought Stream — live agent activity */}
+        <ThoughtStreamPanel agentId={agentId} />
+    </div>
     </div>
   );
 }

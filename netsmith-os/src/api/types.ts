@@ -108,3 +108,46 @@ export interface CronCreateInput {
   thinking?: string;
   model?: string;
 }
+
+// ─── Chat types ─────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  agentId: string;
+  agentName?: string;
+  agentEmoji?: string;
+  content: string;
+  model?: string | null;
+  tokens?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  ts: number;
+  warning?: string;
+  loading?: boolean;
+}
+
+export interface ChatResponse {
+  agentId: string;
+  agentName: string;
+  agentEmoji: string;
+  response: string;
+  model: string | null;
+  tokens: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null;
+  ts: number;
+  warning?: string;
+}
+
+// ─── Thought stream types ───────────────────────────────────────────────────
+
+export interface ThoughtEvent {
+  type: "thought" | "connected";
+  agentId: string;
+  ts: number;
+  level?: string;
+  event?: string;
+  message?: string;
+  model?: string | null;
+  toolName?: string | null;
+  toolInput?: string | null;
+  tokens?: any | null;
+  sessionId?: string | null;
+}
