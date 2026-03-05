@@ -2174,6 +2174,140 @@ function stopLogTail(agentId) {
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // START SERVER
+// ─── CHANNEL MESSAGE WATCHER — polls Slack/Discord session files ─────────────
+
+const OPENCLAW_AGENTS_DIR = '/home/brandon/.openclaw/agents';
+const KNOWN_AGENT_IDS = ['main', 'elon', 'gary', 'warren', 'steve', 'noah', 'clay', 'calvin'];
+const channelSessionPositions = new Map(); // sessionFile → lastByteOffset
+let channelWatcherTimer = null;
+
+function broadcastChannelThought(agentId, channel, role, text, timestamp) {
+  const agentNames = {
+    main: 'Tim', elon: 'Elon', gary: 'Gary', warren: 'Warren',
+    steve: 'Steve', noah: 'Noah', clay: 'Clay', calvin: 'Calvin',
+  };
+  const channelIcon = channel === 'slack' ? '💬 Slack' : channel === 'discord' ? '🎮 Discord' : channel;
+  const who = role === 'user' ? '→ Agent' : `${agentNames[agentId] || agentId} →`;
+  const preview = text.length > 400 ? text.slice(0, 400) + '…' : text;
+  const thought = {
+    type: 'thought',
+    agentId,
+    ts: timestamp || Date.now(),
+    level: 'info',
+    event: 'channel-message',
+    message: `[${channelIcon}] ${who} ${preview}`,
+    channel,
+    role,
+  };
+  const payload = 'data: ' + JSON.stringify(thought) + '\n\n';
+  // Broadcast to ALL active thought stream clients (channel msgs are org-wide)
+  for (const [, clients] of thoughtStreamClients) {
+    for (const client of clients) {
+      try { client.write(payload); } catch {}
+    }
+  }
+}
+
+function parseSessionKey(key) {
+  // key format: agent:<agentId>:slack:channel:<channelId>
+  //             agent:<agentId>:discord:channel:<channelId>
+  const m = key.match(/^agent:([^:]+):(slack|discord):channel:/);
+  if (!m) return null;
+  return { agentId: m[1], channel: m[2] };
+}
+
+async function pollChannelSessions() {
+  const fs = require('fs');
+  const path = require('path');
+
+  for (const agentId of KNOWN_AGENT_IDS) {
+    const sessionsFile = path.join(OPENCLAW_AGENTS_DIR, agentId, 'sessions', 'sessions.json');
+    let sessionsData;
+    try {
+      sessionsData = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+    } catch { continue; }
+
+    for (const [sessionKey, sessionVal] of Object.entries(sessionsData)) {
+      const parsed = parseSessionKey(sessionKey);
+      if (!parsed) continue;
+
+      const sessionId = sessionVal && sessionVal.sessionId;
+      if (!sessionId) continue;
+
+      const sessionFile = path.join(OPENCLAW_AGENTS_DIR, agentId, 'sessions', sessionId + '.jsonl');
+      if (!fs.existsSync(sessionFile)) continue;
+
+      const stat = fs.statSync(sessionFile);
+      const fileSize = stat.size;
+      const lastPos = channelSessionPositions.get(sessionFile);
+
+      if (lastPos === undefined) {
+        // First time seeing this file — mark position at end (don't replay history)
+        channelSessionPositions.set(sessionFile, fileSize);
+        continue;
+      }
+
+      if (fileSize <= lastPos) continue; // No new content
+
+      // Read only new content
+      const fd = fs.openSync(sessionFile, 'r');
+      const newBytes = fileSize - lastPos;
+      const buf = Buffer.alloc(newBytes);
+      fs.readSync(fd, buf, 0, newBytes, lastPos);
+      fs.closeSync(fd);
+      channelSessionPositions.set(sessionFile, fileSize);
+
+      const newLines = buf.toString('utf8').split('\n').filter(l => l.trim());
+      for (const line of newLines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type !== 'message') continue;
+          const msg = entry.message;
+          if (!msg || !msg.role) continue;
+
+          // Extract text content
+          let text = '';
+          if (typeof msg.content === 'string') {
+            text = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            text = msg.content
+              .filter(c => c.type === 'text')
+              .map(c => c.text || '')
+              .join(' ');
+          }
+
+          text = text.trim();
+          // Skip empty, system messages (cron triggers), and tool-only messages
+          if (!text) continue;
+          if (text.startsWith('[') && text.includes('[System Message]')) continue;
+          if (text.startsWith('[') && text.includes('[sessionId:')) continue;
+
+          broadcastChannelThought(
+            parsed.agentId,
+            parsed.channel,
+            msg.role,
+            text,
+            entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now()
+          );
+        } catch {}
+      }
+    }
+  }
+}
+
+function startChannelWatcher() {
+  if (channelWatcherTimer) return;
+  // Initial scan to register all current session file positions (no replay)
+  pollChannelSessions().catch(() => {});
+  // Poll every 8 seconds for new messages
+  channelWatcherTimer = setInterval(() => {
+    pollChannelSessions().catch(() => {});
+  }, 8000);
+}
+
+// Start the watcher immediately on server startup
+startChannelWatcher();
+
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const PORT = process.env.API_PORT || 7101;

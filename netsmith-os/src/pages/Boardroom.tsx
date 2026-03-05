@@ -12,45 +12,52 @@ interface SeatConfig {
   agentId: string;
   name: string;
   title: string;
-  position: 'head' | 'left' | 'right' | 'left2' | 'right2' | 'left3' | 'right3';
+  side: 'head' | 'foot' | 'left' | 'right';
+  sideIndex?: number; // 0=top, 1=mid, 2=bottom for left/right
   isHuman?: boolean;
 }
 
 const SEATS: SeatConfig[] = [
-  { agentId: 'brandon', name: 'Brandon', title: 'CEO', position: 'head', isHuman: true },
-  { agentId: 'main', name: 'Tim Cook', title: 'COO', position: 'left' },
-  { agentId: 'elon', name: 'Elon Musk', title: 'CTO', position: 'right' },
-  { agentId: 'gary', name: 'Gary Vee', title: 'CMO', position: 'left2' },
-  { agentId: 'warren', name: 'Warren Buffett', title: 'CRO', position: 'right2' },
-  { agentId: 'steve', name: 'Steve Jobs', title: 'CPO', position: 'left3' },
-  { agentId: 'noah', name: 'Noah Kagan', title: 'SMM', position: 'right3' },
+  { agentId: 'brandon', name: 'Brandon', title: 'CEO', side: 'head', isHuman: true },
+  { agentId: 'main',    name: 'Tim',     title: 'COO', side: 'left',  sideIndex: 0 },
+  { agentId: 'gary',    name: 'Gary',    title: 'CMO', side: 'left',  sideIndex: 1 },
+  { agentId: 'steve',   name: 'Steve',   title: 'CPO', side: 'left',  sideIndex: 2 },
+  { agentId: 'elon',    name: 'Elon',    title: 'CTO', side: 'right', sideIndex: 0 },
+  { agentId: 'warren',  name: 'Warren',  title: 'CFO', side: 'right', sideIndex: 1 },
+  { agentId: 'noah',    name: 'Noah',    title: 'CSO', side: 'right', sideIndex: 2 },
 ];
 
-function SeatCard({ seat, agent, onDrill }: { seat: SeatConfig; agent: Agent | undefined; onDrill: (id: string) => void }) {
+function SeatCard({
+  seat, agent, onDrill,
+}: { seat: SeatConfig; agent: Agent | undefined; onDrill: (id: string) => void }) {
   const status = seat.isHuman ? 'active' : (agent?.status || 'idle');
   const isActive = status === 'active' || status === 'busy';
   const emoji = agent?.emoji;
 
+  const sideClass = seat.side === 'left' || seat.side === 'right'
+    ? `boardroom-seat-${seat.side}-${seat.sideIndex}`
+    : `boardroom-seat-${seat.side}`;
+
   return (
     <div
-      className={`boardroom-seat boardroom-seat-${seat.position} ${isActive ? 'seat-active' : 'seat-idle'}`}
+      className={`boardroom-seat ${sideClass} ${isActive ? 'seat-active' : 'seat-idle'} ${seat.side === 'left' ? 'seat-faces-right' : seat.side === 'right' ? 'seat-faces-left' : ''}`}
       onClick={() => !seat.isHuman && onDrill(seat.agentId)}
-      title={seat.isHuman ? seat.name : `View ${seat.name}`}
+      title={seat.isHuman ? seat.name : `Open ${seat.name}'s DrillView`}
     >
-      <div className="seat-avatar-wrap">
-        {seat.isHuman ? (
-          <span style={{ fontSize: 32 }}>👤</span>
-        ) : (
-          <AgentAvatar agentId={seat.agentId} emoji={emoji} size={52} />
-        )}
-        <span className={`seat-status-dot ${isActive ? 'dot-active' : 'dot-idle'}`} />
-      </div>
-      <div className="seat-info">
-        <div className="seat-name">{seat.name}</div>
-        <div className="seat-title">{seat.title}</div>
-        {!seat.isHuman && agent?.model && (
-          <div className="seat-model">{agent.model.split('/').pop()?.replace(/-/g, ' ')}</div>
-        )}
+      <div className="seat-chair" />
+      <div className="seat-card-inner">
+        <div className="seat-avatar-wrap">
+          {seat.isHuman ? (
+            <span className="seat-human-avatar">👤</span>
+          ) : (
+            <AgentAvatar agentId={seat.agentId} emoji={emoji} size={44} />
+          )}
+          <span className={`seat-status-dot ${isActive ? 'dot-active' : 'dot-idle'}`} />
+        </div>
+        <div className="seat-info">
+          <div className="seat-name">{seat.name}</div>
+          <div className="seat-title">{seat.title}</div>
+        </div>
       </div>
     </div>
   );
@@ -70,6 +77,7 @@ export default function Boardroom({ agents, onDrill }: BoardroomProps) {
   return (
     <div className="boardroom">
       <div className="boardroom-header">
+        <div className="boardroom-title">Executive Boardroom</div>
         <div className="boardroom-stats">
           <div className="br-stat">
             <span className="br-stat-value">{agents.length + 1}</span>
@@ -86,23 +94,43 @@ export default function Boardroom({ agents, onDrill }: BoardroomProps) {
         </div>
       </div>
 
-      <div className="boardroom-arena">
-        {/* The table */}
-        <div className="boardroom-table">
-          <div className="table-surface">
-            <div className="table-logo">⬡ NetSmith</div>
-          </div>
-        </div>
+      <div className="boardroom-room">
+        {/* Room back wall */}
+        <div className="room-wall" />
+        <div className="room-floor" />
 
-        {/* Seats */}
-        {SEATS.map(seat => (
-          <SeatCard
-            key={seat.agentId}
-            seat={seat}
-            agent={agentMap.get(seat.agentId)}
-            onDrill={onDrill}
-          />
-        ))}
+        {/* Window panels on back wall */}
+        <div className="room-window room-window-left" />
+        <div className="room-window room-window-right" />
+
+        {/* Arena with table */}
+        <div className="boardroom-arena">
+          {/* The wooden table */}
+          <div className="boardroom-table">
+            <div className="table-wood">
+              <div className="table-grain" />
+              <div className="table-reflection" />
+              <div className="table-items">
+                <div className="table-nameplate">⬡ NetSmith OS</div>
+                <div className="table-glasses">
+                  <span className="table-glass" />
+                  <span className="table-glass" />
+                  <span className="table-glass" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Seats */}
+          {SEATS.map(seat => (
+            <SeatCard
+              key={seat.agentId}
+              seat={seat}
+              agent={agentMap.get(seat.agentId)}
+              onDrill={onDrill}
+            />
+          ))}
+        </div>
       </div>
 
       <div className="boardroom-legend">
