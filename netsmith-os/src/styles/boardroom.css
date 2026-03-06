@@ -158,8 +158,8 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 440px;
-  height: 220px;
+  width: 200px;
+  height: 400px;
   z-index: 2;
 }
 
@@ -197,14 +197,14 @@
   outline-offset: 2px;
 }
 
-/* Wood grain lines */
+/* Wood grain lines — run vertically along the long axis */
 .table-grain {
   position: absolute;
   inset: 0;
   opacity: 0.35;
   background-image:
     repeating-linear-gradient(
-      88deg,
+      2deg,
       transparent 0px,
       transparent 14px,
       rgba(0,0,0,0.15) 14px,
@@ -215,7 +215,7 @@
       rgba(255,180,60,0.05) 29px
     ),
     repeating-linear-gradient(
-      92deg,
+      178deg,
       transparent 0px,
       transparent 22px,
       rgba(0,0,0,0.08) 22px,
@@ -259,7 +259,8 @@
 
 .table-glasses {
   display: flex;
-  gap: 24px;
+  flex-direction: column;
+  gap: 30px;
   align-items: center;
 }
 
@@ -415,15 +416,15 @@
 }
 .boardroom-seat-head .seat-card-inner { order: 0; }
 
-/* Left side (3 seats) */
-.boardroom-seat-left-0 { top: 22%; left: 2%; }
-.boardroom-seat-left-1 { top: 46%; left: 2%; }
-.boardroom-seat-left-2 { top: 70%; left: 2%; }
+/* Left side (3 seats) — calc(50% - tableHalfW(100) - seatCardHalfW(41) - gap(8)) = calc(50% - 149px) */
+.boardroom-seat-left-0 { top: 22%; left: calc(50% - 149px); }
+.boardroom-seat-left-1 { top: 46%; left: calc(50% - 149px); }
+.boardroom-seat-left-2 { top: 70%; left: calc(50% - 149px); }
 
 /* Right side (3 seats) */
-.boardroom-seat-right-0 { top: 22%; right: 2%; }
-.boardroom-seat-right-1 { top: 46%; right: 2%; }
-.boardroom-seat-right-2 { top: 70%; right: 2%; }
+.boardroom-seat-right-0 { top: 22%; right: calc(50% - 149px); }
+.boardroom-seat-right-1 { top: 46%; right: calc(50% - 149px); }
+.boardroom-seat-right-2 { top: 70%; right: calc(50% - 149px); }
 
 /* ── Legend ── */
 .boardroom-legend {

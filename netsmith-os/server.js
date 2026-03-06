@@ -2060,6 +2060,14 @@ app.get('/api/agents/:id/stream', (req, res) => {
   }
   thoughtStreamClients.get(id).add(res);
 
+  // Replay recent Slack/Discord channel messages for this new client
+  try {
+    const recent = getRecentChannelMessages(5);
+    for (const msg of recent) {
+      broadcastChannelThought(msg.agentId, msg.channel, msg.role, msg.text, msg.ts, res);
+    }
+  } catch {}
+
   ensureLogTail(id);
 
   req.on('close', () => {
@@ -2181,7 +2189,7 @@ const KNOWN_AGENT_IDS = ['main', 'elon', 'gary', 'warren', 'steve', 'noah', 'cla
 const channelSessionPositions = new Map(); // sessionFile → lastByteOffset
 let channelWatcherTimer = null;
 
-function broadcastChannelThought(agentId, channel, role, text, timestamp) {
+function broadcastChannelThought(agentId, channel, role, text, timestamp, targetRes = null) {
   const agentNames = {
     main: 'Tim', elon: 'Elon', gary: 'Gary', warren: 'Warren',
     steve: 'Steve', noah: 'Noah', clay: 'Clay', calvin: 'Calvin',
@@ -2200,12 +2208,70 @@ function broadcastChannelThought(agentId, channel, role, text, timestamp) {
     role,
   };
   const payload = 'data: ' + JSON.stringify(thought) + '\n\n';
+  if (targetRes) {
+    // Send only to a specific client (for replay on connect)
+    try { targetRes.write(payload); } catch {}
+    return;
+  }
   // Broadcast to ALL active thought stream clients (channel msgs are org-wide)
+  let clientCount = 0;
   for (const [, clients] of thoughtStreamClients) {
     for (const client of clients) {
+      clientCount++;
       try { client.write(payload); } catch {}
     }
   }
+  if (clientCount > 0) {
+    console.log(`[channel] broadcast ${channel}/${agentId}/${role}: "${preview.slice(0, 60)}" → ${clientCount} clients`);
+  }
+}
+
+// Read last N messages from all channel session files (for replay on connect)
+function getRecentChannelMessages(maxPerSession = 5) {
+  const fs = require('fs');
+  const path = require('path');
+  const results = [];
+  for (const agentId of KNOWN_AGENT_IDS) {
+    const sessionsFile = path.join(OPENCLAW_AGENTS_DIR, agentId, 'sessions', 'sessions.json');
+    let sessionsData;
+    try { sessionsData = JSON.parse(fs.readFileSync(sessionsFile, 'utf8')); } catch { continue; }
+    for (const [sessionKey, sessionVal] of Object.entries(sessionsData)) {
+      const m = sessionKey.match(/^agent:([^:]+):(slack|discord):channel:/);
+      if (!m) continue;
+      const sessionId = sessionVal && sessionVal.sessionId;
+      if (!sessionId) continue;
+      const sessionFile = path.join(OPENCLAW_AGENTS_DIR, agentId, 'sessions', sessionId + '.jsonl');
+      if (!fs.existsSync(sessionFile)) continue;
+      try {
+        const lines = fs.readFileSync(sessionFile, 'utf8').split('\n').filter(l => l.trim());
+        const recent = lines.slice(-maxPerSession);
+        for (const line of recent) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type !== 'message') continue;
+            const msg = entry.message;
+            if (!msg || !msg.role) continue;
+            let text = '';
+            if (typeof msg.content === 'string') { text = msg.content; }
+            else if (Array.isArray(msg.content)) {
+              text = msg.content.filter(c => c.type === 'text').map(c => c.text || '').join(' ');
+            }
+            text = text.trim();
+            if (!text) continue;
+            if (text.startsWith('[') && text.includes('[System Message]')) continue;
+            if (text.startsWith('[') && text.includes('[sessionId:')) continue;
+            results.push({
+              agentId: m[1], channel: m[2], role: msg.role, text,
+              ts: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now(),
+            });
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+  // Sort by timestamp ascending
+  results.sort((a, b) => a.ts - b.ts);
+  return results;
 }
 
 function parseSessionKey(key) {
@@ -2282,6 +2348,7 @@ async function pollChannelSessions() {
           if (text.startsWith('[') && text.includes('[System Message]')) continue;
           if (text.startsWith('[') && text.includes('[sessionId:')) continue;
 
+          console.log(`[channel-watcher] new msg: ${parsed.agentId}/${parsed.channel}/${msg.role}`);
           broadcastChannelThought(
             parsed.agentId,
             parsed.channel,

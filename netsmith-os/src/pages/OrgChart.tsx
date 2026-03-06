@@ -107,7 +107,12 @@ function AgentCard({ agent, expanded, onToggle, onDrill, hasChildren }: AgentCar
     : undefined
 
   return (
-    <div className="agent-card" style={{ width: '200px', textAlign: 'center' }}>
+    <div
+      className="agent-card"
+      style={{ width: '200px', textAlign: 'center', cursor: agentId && onDrill ? 'pointer' : 'default' }}
+      onClick={agentId && onDrill ? () => onDrill() : undefined}
+      title={agentId && onDrill ? `Open ${agent.name}'s DrillView` : undefined}
+    >
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
         {agentId ? (
           <AgentAvatar agentId={agentId} emoji={agent.avatar} size={44} />
@@ -127,13 +132,11 @@ function AgentCard({ agent, expanded, onToggle, onDrill, hasChildren }: AgentCar
       </div>
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 8 }}>
         {hasChildren && (
-          <button onClick={onToggle} style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-color)', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}>
+          <button
+            onClick={e => { e.stopPropagation(); onToggle && onToggle(); }}
+            style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-color)', borderRadius: 4, padding: '2px 6px', cursor: 'pointer' }}
+          >
             {expanded ? '▼ Collapse' : '▶ Expand'}
-          </button>
-        )}
-        {agentId && onDrill && (
-          <button onClick={onDrill} style={{ fontSize: '10px', color: 'var(--accent-primary)', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer' }}>
-            View →
           </button>
         )}
       </div>
