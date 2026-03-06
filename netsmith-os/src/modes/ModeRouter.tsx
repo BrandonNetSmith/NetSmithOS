@@ -15,6 +15,8 @@ import CostExplorer from '../pages/CostExplorer';
 import SettingsStub from '../pages/SettingsStub';
 import Boardroom from '../pages/Boardroom';
 import { ChatPanel } from '../bridge/ChatPanel';
+import { CommandPalette } from '../components/CommandPalette';
+import '../styles/command-palette.css';
 import { api } from '../api/client';
 import type { AppMode, Agent } from '../api/types';
 
@@ -63,6 +65,7 @@ export function ModeRouter() {
   const [mode, setMode] = useState<AppMode>('bridge');
   const [drillAgent, setDrillAgent] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
 
   // Fetch agents globally with 15s refresh
@@ -77,6 +80,19 @@ export function ModeRouter() {
     load();
     const interval = setInterval(load, 15000);
     return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+
+  // Ctrl+K / Cmd+K command palette
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setCmdOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const handleDrill = (agentId: string) => {
@@ -173,6 +189,15 @@ export function ModeRouter() {
               <span style={{ fontSize: '24px' }}>💬</span>
             </button>
           )}
+          <CommandPalette
+            isOpen={cmdOpen}
+            onClose={() => setCmdOpen(false)}
+            onNavigate={handleNavigate}
+            onDrill={handleDrill}
+            onForge={() => setMode('forge')}
+            onChatToggle={toggleChat}
+            agents={agents}
+          />
         </>
       </ErrorBoundary>
     );
@@ -284,6 +309,15 @@ export function ModeRouter() {
           <span style={{ fontSize: '24px' }}>💬</span>
         </button>
       )}
+      <CommandPalette
+        isOpen={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onNavigate={handleNavigate}
+        onDrill={handleDrill}
+        onForge={() => setMode('forge')}
+        onChatToggle={toggleChat}
+        agents={agents}
+      />
     </ErrorBoundary>
   );
 }
