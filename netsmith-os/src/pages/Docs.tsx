@@ -12,9 +12,9 @@ const docs: DocSection[] = [
   {
     id: 'overview',
     title: 'Overview',
-    content: `# What is Muddy OS?
+    content: `# What is NetSmith OS?
 
-Muddy OS is the operational dashboard and control center for SteelClaw's AI agent infrastructure. It provides a unified interface for managing, monitoring, and coordinating multiple AI agents working together as a virtual executive team.
+NetSmith OS is the operational dashboard and control center for SteelClaw's AI agent infrastructure. It provides a unified interface for managing, monitoring, and coordinating multiple AI agents working together as a virtual executive team.
 
 ## Key Features
 
@@ -37,7 +37,7 @@ NetSmithOS runs as a local web application that reads directly from the filesyst
 ## Getting Started
 
 1. The dashboard auto-loads at \`http://localhost:7100\`
-2. Navigate using the left sidebar modules (🚀 Ops, 🧠 Brain, 🧪 Lab)
+2. Navigate using the left sidebar to access Bridge, Health, Org Chart, and more
 3. Use the top navigation within each module to access different features
 4. Settings gear at bottom for configuration
 

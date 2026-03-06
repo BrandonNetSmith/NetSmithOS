@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-interface Agent {
+interface AgentEntry {
   name: string
   key: string
   tagline: string
@@ -15,23 +15,9 @@ interface FileInfo {
   path: string
 }
 
-const agents: Agent[] = [
-  {
-    name: 'Tim (Main)',
-    key: 'main',
-    tagline: 'COO • Primary Operations',
-    avatar: '🧠'
-  },
-  {
-    name: 'Clay',
-    key: 'clay',
-    tagline: 'Community Agent • Discord Support',
-    avatar: '🦞'
-  }
-]
-
 export default function Workspaces() {
-  const [selectedAgent, setSelectedAgent] = useState<Agent>(agents[0])
+  const [agents, setAgents] = useState<AgentEntry[]>([])
+  const [selectedAgent, setSelectedAgent] = useState<AgentEntry | null>(null)
   const [files, setFiles] = useState<FileInfo[]>([])
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
   const [fileContent, setFileContent] = useState('')
@@ -42,11 +28,36 @@ export default function Workspaces() {
   const [error, setError] = useState<string | null>(null)
   const [workspacePath, setWorkspacePath] = useState('')
 
+  // Load agents from API
   useEffect(() => {
-    loadFiles()
+    async function loadAgents() {
+      try {
+        const res = await fetch('/api/agents')
+        if (!res.ok) return
+        const data = await res.json()
+        const mapped: AgentEntry[] = (data || []).map((a: any) => ({
+          name: a.name || a.agentId || a.id,
+          key: a.agentId || a.id,
+          tagline: `${a.role || 'Agent'} • ${a.status || 'idle'}`,
+          avatar: a.emoji || '⬡',
+        }))
+        setAgents(mapped)
+        if (mapped.length > 0 && !selectedAgent) {
+          setSelectedAgent(mapped[0])
+        }
+      } catch {
+        // silent fail
+      }
+    }
+    loadAgents()
+  }, [])
+
+  useEffect(() => {
+    if (selectedAgent) loadFiles()
   }, [selectedAgent])
 
   const loadFiles = async () => {
+    if (!selectedAgent) return
     setIsLoading(true)
     setError(null)
     try {
@@ -69,6 +80,7 @@ export default function Workspaces() {
   }
 
   const loadFile = async (file: FileInfo) => {
+    if (!selectedAgent) return
     setIsLoading(true)
     setError(null)
     try {
@@ -89,7 +101,7 @@ export default function Workspaces() {
   }
 
   const handleSave = async () => {
-    if (!selectedFile) return
+    if (!selectedFile || !selectedAgent) return
 
     setIsSaving(true)
     setError(null)
@@ -121,7 +133,7 @@ export default function Workspaces() {
           {agents.map((agent) => (
             <div
               key={agent.key}
-              className={`sidebar-item ${selectedAgent.key === agent.key ? 'active' : ''}`}
+              className={`sidebar-item ${selectedAgent?.key === agent.key ? 'active' : ''}`}
               onClick={() => setSelectedAgent(agent)}
             >
               <span style={{ marginRight: '8px' }}>{agent.avatar}</span>
@@ -172,8 +184,8 @@ export default function Workspaces() {
 
         <div className="workspace-header">
           <div className="workspace-info">
-            <h2>{selectedAgent.avatar} {selectedAgent.name}</h2>
-            <div className="workspace-tagline">{selectedAgent.tagline}</div>
+            <h2>{selectedAgent?.avatar} {selectedAgent?.name}</h2>
+            <div className="workspace-tagline">{selectedAgent?.tagline}</div>
             <div className="workspace-path">{workspacePath}</div>
           </div>
         </div>

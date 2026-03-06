@@ -80,7 +80,6 @@ export function BridgeView({ agents: externalAgents, onDrill, onForge, onNavigat
         if (Array.isArray(data)) setAlerts(data as Alert[]);
         break;
       case "connected":
-        console.log("SSE connected to NetSmith gateway");
         break;
     }
   }, []);

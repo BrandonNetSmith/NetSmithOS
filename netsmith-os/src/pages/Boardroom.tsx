@@ -23,8 +23,8 @@ const SEATS: SeatConfig[] = [
   { agentId: 'gary',    name: 'Gary',    title: 'CMO', side: 'left',  sideIndex: 1 },
   { agentId: 'steve',   name: 'Steve',   title: 'CPO', side: 'left',  sideIndex: 2 },
   { agentId: 'elon',    name: 'Elon',    title: 'CTO', side: 'right', sideIndex: 0 },
-  { agentId: 'warren',  name: 'Warren',  title: 'CFO', side: 'right', sideIndex: 1 },
-  { agentId: 'noah',    name: 'Noah',    title: 'CSO', side: 'right', sideIndex: 2 },
+  { agentId: 'warren',  name: 'Warren',  title: 'CRO', side: 'right', sideIndex: 1 },
+  { agentId: 'noah',    name: 'Noah',    title: 'SMM', side: 'right', sideIndex: 2 },
 ];
 
 function SeatCard({

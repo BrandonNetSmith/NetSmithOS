@@ -16,7 +16,7 @@ interface ActivityRun {
 const AGENT_META: Record<string, { name: string; emoji: string }> = {
   tim: { name: 'Tim', emoji: '🧠' },
   main: { name: 'Tim', emoji: '🧠' },
-  elon: { name: 'Elon', emoji: '⚡' },
+  elon: { name: 'Elon', emoji: '🔨' },
   gary: { name: 'Gary', emoji: '📢' },
   warren: { name: 'Warren', emoji: '💰' },
   steve: { name: 'Steve', emoji: '🎯' },
