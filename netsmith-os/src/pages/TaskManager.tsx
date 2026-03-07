@@ -213,7 +213,6 @@ export default function TaskManager({ onNavigate }: { onNavigate?: (mode: AppMod
 
       setLastRefresh(new Date())
     } catch (err) {
-      console.error('Failed to load data:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setLoading(false)

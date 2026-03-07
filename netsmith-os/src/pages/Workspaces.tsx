@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useToast } from '../components/Toast'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -27,6 +28,7 @@ export default function Workspaces() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [workspacePath, setWorkspacePath] = useState('')
+  const toast = useToast()
 
   // Load agents from API
   useEffect(() => {
@@ -71,7 +73,6 @@ export default function Workspaces() {
       setFileContent('')
       setMode('preview')
     } catch (err) {
-      console.error('Failed to load files:', err)
       setError(err instanceof Error ? err.message : 'Failed to load files')
       setFiles([])
     } finally {
@@ -93,7 +94,6 @@ export default function Workspaces() {
       setEditContent(data.content)
       setMode('preview')
     } catch (err) {
-      console.error('Failed to load file:', err)
       setError(err instanceof Error ? err.message : 'Failed to load file')
     } finally {
       setIsLoading(false)
@@ -116,10 +116,12 @@ export default function Workspaces() {
 
       setFileContent(editContent)
       setMode('preview')
+      toast.success(`Saved ${selectedFile.name}`)
       loadFiles()
     } catch (err) {
-      console.error('Failed to save file:', err)
-      setError(err instanceof Error ? err.message : 'Failed to save file')
+      const msg = err instanceof Error ? err.message : 'Failed to save file'
+      setError(msg)
+      toast.error(msg)
     } finally {
       setIsSaving(false)
     }

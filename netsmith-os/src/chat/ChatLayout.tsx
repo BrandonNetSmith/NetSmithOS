@@ -28,7 +28,6 @@ export function ChatLayout({ agents, isOpen, onClose }: ChatLayoutProps) {
       const data = await api.getChannels();
       setChannels(data.channels);
     } catch (err) {
-      console.error('[chat] Failed to fetch channels:', err);
     }
   }, []);
 
@@ -56,7 +55,6 @@ export function ChatLayout({ agents, isOpen, onClose }: ChatLayoutProps) {
       }
       setHasMore(data.hasMore);
     } catch (err) {
-      console.error('[chat] Failed to fetch messages:', err);
     } finally {
       setLoading(false);
     }
@@ -123,7 +121,6 @@ export function ChatLayout({ agents, isOpen, onClose }: ChatLayoutProps) {
       await api.sendChannelMessage(activeChannelId, content.trim());
       // Messages will arrive via SSE, no need to manually add
     } catch (err) {
-      console.error('[chat] Failed to send message:', err);
     } finally {
       setSending(false);
     }

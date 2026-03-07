@@ -89,7 +89,6 @@ export default function CostExplorer() {
       setAgents(a)
       setLastRefresh(new Date())
     } catch (err) {
-      console.error('Failed to load costs:', err)
       setError(err instanceof Error ? err.message : 'Failed to load cost data')
     }
   }

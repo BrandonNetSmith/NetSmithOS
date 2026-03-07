@@ -98,7 +98,6 @@ export function MeetingView({ meetingId, topic, participants, agents, onClose }:
       await api.sendMeetingMessage(meetingId, input.trim());
       setInput('');
     } catch (err) {
-      console.error('Failed to send:', err);
     }
     setSending(false);
   }, [input, sending, meetingId, meetingState]);
@@ -107,7 +106,6 @@ export function MeetingView({ meetingId, topic, participants, agents, onClose }:
     try {
       await api.endMeeting(meetingId);
     } catch (err) {
-      console.error('Failed to end meeting:', err);
     }
   }, [meetingId]);
 

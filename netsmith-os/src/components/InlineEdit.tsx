@@ -30,7 +30,6 @@ export function InlineEdit({ value, onSave, label, multiline = false }: InlineEd
       await onSave(draft);
       setEditing(false);
     } catch (err) {
-      console.error('InlineEdit save failed:', err);
     } finally {
       setSaving(false);
     }

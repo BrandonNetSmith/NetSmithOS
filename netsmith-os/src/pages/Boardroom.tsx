@@ -167,7 +167,6 @@ export function Boardroom({ agents, onDrill }: { agents: Agent[]; onDrill: (id: 
       const result = await api.createMeeting(topic, participants);
       setMeetingId(result.id);
     } catch (err) {
-      console.error('Failed to create meeting:', err);
       setState('idle');
     }
   };

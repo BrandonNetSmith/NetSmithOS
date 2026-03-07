@@ -17,12 +17,10 @@ export function useSSE(
         const parsed = JSON.parse(event.data);
         onMessageRef.current(parsed.type, parsed.data);
       } catch (e) {
-        console.error("SSE parse error:", e);
       }
     };
 
     source.onerror = () => {
-      console.warn("SSE connection error, will retry...");
     };
 
     return () => {

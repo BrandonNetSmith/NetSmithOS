@@ -136,7 +136,6 @@ export default function Standup({ agents = [] }: { agents?: any[] }) {
       const data = await res.json()
       setStandups(data.standups || [])
     } catch (err) {
-      console.error('Failed to load standups:', err)
       setError(err instanceof Error ? err.message : 'Failed to load standups')
     } finally {
       setIsLoading(false)
@@ -152,7 +151,6 @@ export default function Standup({ agents = [] }: { agents?: any[] }) {
       const data = await res.json()
       setSelectedStandup({ ...standup, content: data.content })
     } catch (err) {
-      console.error('Failed to load standup:', err)
       setError(err instanceof Error ? err.message : 'Failed to load standup')
     } finally {
       setIsLoading(false)
@@ -217,7 +215,6 @@ export default function Standup({ agents = [] }: { agents?: any[] }) {
         })
       }
     } catch (err) {
-      console.error('Failed to create standup:', err)
       setError(err instanceof Error ? err.message : 'Failed to create standup')
     } finally {
       setIsLoading(false)

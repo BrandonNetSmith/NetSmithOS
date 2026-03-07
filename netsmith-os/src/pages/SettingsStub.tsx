@@ -83,7 +83,6 @@ export default function Settings() {
         cfgResults.forEach(({ id, cfg }) => { if (cfg) cfgMap[id] = cfg; });
         setConfigs(cfgMap);
       } catch (e) {
-        console.error('Failed to load settings:', e);
       }
       setLoading(false);
     };

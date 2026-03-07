@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useToast } from "../components/Toast";
 import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { ModelInfo } from "../api/types";
@@ -31,6 +32,7 @@ function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
 }
 
 export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDeleted, onAgentRenamed, onStopped }: AgentControlBarProps) {
+  const toast = useToast();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(currentModel || "");
   const [thinkingLevel, setThinkingLevel] = useState("off");
@@ -92,14 +94,24 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
     setShowModelDropdown(false);
     setModelSearch("");
     setSaving("model");
-    try { await api.updateAgentModel(agentId, modelKey); } catch {}
+    try {
+      await api.updateAgentModel(agentId, modelKey);
+      toast.success(`Model updated to ${modelKey.split("/").pop()}`);
+    } catch (err) {
+      toast.error(`Failed to update model: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
     setSaving(null);
   };
 
   const handleThinkingChange = async (level: string) => {
     setThinkingLevel(level);
     setSaving("thinking");
-    try { await api.updateAgentThinking(agentId, level); } catch {}
+    try {
+      await api.updateAgentThinking(agentId, level);
+      toast.success(`Thinking set to ${level}`);
+    } catch (err) {
+      toast.error(`Failed to update thinking: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
     setSaving(null);
   };
 
@@ -107,6 +119,7 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
     setSaving("stop");
     try {
       await api.stopAgent(agentId);
+      toast.info("Agent stop signal sent");
       // Immediately trigger parent refresh
       onStopped?.();
       // Poll for status update: check every 2s for 10s
@@ -121,7 +134,8 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
       }, 2000);
       // Clear saving state after brief delay (button text)
       setTimeout(() => setSaving(null), 1500);
-    } catch {
+    } catch (err) {
+      toast.error(`Failed to stop agent: ${err instanceof Error ? err.message : "Unknown error"}`);
       setSaving(null);
     }
   };
@@ -130,8 +144,13 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
     setSaving("delete");
     try {
       const result = await api.deleteAgent(agentId);
-      if (result.success) onAgentDeleted();
-    } catch {}
+      if (result.success) {
+        toast.success("Agent deleted");
+        onAgentDeleted();
+      }
+    } catch (err) {
+      toast.error(`Failed to delete agent: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
     setSaving(null);
     setShowDeleteConfirm(false);
   };
@@ -141,8 +160,13 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
     setSaving("rename");
     try {
       const result = await api.renameAgent(agentId, renameValue.trim());
-      if (result.success) onAgentRenamed(renameValue.trim());
-    } catch {}
+      if (result.success) {
+        toast.success(`Agent renamed to "${renameValue.trim()}"`);
+        onAgentRenamed(renameValue.trim());
+      }
+    } catch (err) {
+      toast.error(`Failed to rename agent: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
     setSaving(null);
     setRenaming(false);
   };
