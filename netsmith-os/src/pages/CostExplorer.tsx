@@ -31,6 +31,27 @@ function timeAgo(ts: number | null): string {
   return Math.floor(diff / 86400000) + 'd ago'
 }
 
+
+// Friendly model display names
+function modelDisplayName(key: string): string {
+  const names: Record<string, string> = {
+    'claude-opus-4-6-20250514': 'Claude Opus 4.6',
+    'claude-opus-4-5-20250120': 'Claude Opus 4.5',
+    'claude-opus-4-20250514': 'Claude Opus 4',
+    'claude-sonnet-4-6-20250514': 'Claude Sonnet 4.6',
+    'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+    'claude-haiku-3-20250307': 'Claude Haiku 3',
+    'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gemini-2.5-pro': 'Gemini 2.5 Pro',
+    'gemini-2.0-flash': 'Gemini 2.0 Flash',
+    'gpt-4o': 'GPT-4o',
+    'gpt-4o-mini': 'GPT-4o Mini',
+    'deepseek-v3': 'DeepSeek V3',
+    'deepseek-r1': 'DeepSeek R1',
+  }
+  return names[key] || key
+}
+
 function BarRow({ label, value, max, total }: { label: string; value: number; max: number; total: number }) {
   const pct = max > 0 ? (value / max) * 100 : 0
   const color = costColor(value, max)
@@ -172,7 +193,7 @@ export default function CostExplorer() {
             {modelEntries.map(([model, cost]) => (
               <BarRow
                 key={model}
-                label={model}
+                label={modelDisplayName(model)}
                 value={cost}
                 max={maxModelCost}
                 total={totalModelSpend}
@@ -232,7 +253,7 @@ export default function CostExplorer() {
                       {agentModelEntries.map(([model, cost]) => (
                         <BarRow
                           key={model}
-                          label={model}
+                          label={modelDisplayName(model)}
                           value={cost}
                           max={agentMaxModel}
                           total={agentModelTotal}

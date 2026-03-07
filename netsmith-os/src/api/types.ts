@@ -151,3 +151,122 @@ export interface ThoughtEvent {
   tokens?: any | null;
   sessionId?: string | null;
 }
+
+
+// ─── Phase 2: Channel types ────────────────────────────────────────────────
+
+export interface Channel {
+  id: string;
+  name: string;
+  type: 'group' | 'direct' | 'meeting' | 'boardroom';
+  description: string | null;
+  participants: string[];
+  created_at: number;
+  last_message_at: number | null;
+  lastMessage?: {
+    content: string;
+    sender_name: string;
+    created_at: number;
+  } | null;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channel_id: string;
+  sender_id: string;
+  sender_name: string;
+  content: string;
+  parent_id: string | null;
+  created_at: number;
+}
+
+// ─── Phase 3: Meeting types ────────────────────────────────────────────────
+
+export interface Meeting {
+  id: string;
+  channelId: string;
+  topic: string;
+  participants: string[];
+  state: 'active' | 'paused' | 'complete';
+  round: number | null;
+  currentSpeaker: string | null;
+  startedAt: number;
+  lastMessageAt?: number | null;
+  messages?: ChannelMessage[];
+}
+
+export interface MeetingEvent {
+  type: 'connected' | 'message' | 'speaking' | 'round' | 'complete';
+  meetingId?: string;
+  agentId?: string;
+  agentName?: string;
+  message?: ChannelMessage;
+  summary?: string;
+  round?: number;
+  state?: string;
+  currentSpeaker?: string | null;
+  ts: number;
+}
+
+
+
+// ─── Phase 5: GoHighLevel CRM types ────────────────────────────────────────
+
+export interface GHLConnectionTest {
+  connected: boolean;
+  locationId?: string;
+  contactCount?: number;
+  error?: string;
+}
+
+export interface GHLPipelineStage {
+  id: string;
+  name: string;
+}
+
+export interface GHLPipeline {
+  id: string;
+  name: string;
+  stages: GHLPipelineStage[];
+  opportunityCount: number;
+  totalValue: number;
+}
+
+export interface GHLStats {
+  contacts: {
+    total: number;
+    recentCount: number;
+  };
+  pipelines: GHLPipeline[];
+  opportunities: {
+    total: number;
+    totalValue: number;
+    openCount: number;
+  };
+  connected: boolean;
+  error?: string;
+}
+
+export interface GHLContact {
+  id: string;
+  contactName?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  tags?: string[];
+  dateAdded?: string;
+  source?: string;
+}
+
+export interface GHLOpportunity {
+  id: string;
+  name: string;
+  monetaryValue: number;
+  pipelineId: string;
+  pipelineStageId: string;
+  status: string;
+  contact?: GHLContact;
+  createdAt?: string;
+  updatedAt?: string;
+}

@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { useSSE } from "../hooks/useSSE";
 import { TopBar } from "./TopBar";
 import { HexGrid } from "./HexGrid";
-import type { Agent, AppMode, CostSummary, Alert } from "../api/types";
+import type { Agent, AppMode, CostSummary, Alert, GHLStats } from "../api/types";
 import "../styles/bridge.css";
 
 interface BridgeViewProps {
@@ -20,6 +20,7 @@ export function BridgeView({ agents: externalAgents, onDrill, onForge, onNavigat
   const [gatewayOnline, setGatewayOnline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ghlStats, setGhlStats] = useState<GHLStats | null>(null);
 
   // Initial data fetch (costs, health, alerts only — agents come from ModeRouter)
   useEffect(() => {
@@ -69,6 +70,21 @@ export function BridgeView({ agents: externalAgents, onDrill, onForge, onNavigat
 
     return () => clearInterval(interval);
   }, []);
+
+  // Fetch GHL stats (non-blocking, separate from main load)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchGHL = async () => {
+      try {
+        const stats = await api.ghlGetStats();
+        if (!cancelled && stats.connected) setGhlStats(stats);
+      } catch { /* GHL fetch is best-effort */ }
+    };
+    fetchGHL();
+    const interval = setInterval(fetchGHL, 60000); // refresh every 60s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
 
   // SSE real-time updates
   const handleSSE = useCallback((type: string, data: any) => {
@@ -131,6 +147,45 @@ export function BridgeView({ agents: externalAgents, onDrill, onForge, onNavigat
         gatewayOnline={gatewayOnline}
         onNavigate={onNavigate}
       />
+
+      {ghlStats && (
+        <div className="bridge-ghl-strip">
+          <div className="bridge-ghl-chip">
+            <span className="bridge-ghl-chip-icon">👥</span>
+            <div className="bridge-ghl-chip-info">
+              <span className="bridge-ghl-chip-label">Contacts</span>
+              <span className="bridge-ghl-chip-value">{ghlStats.contacts?.total?.toLocaleString() ?? '—'}</span>
+            </div>
+          </div>
+          <div className="bridge-ghl-chip">
+            <span className="bridge-ghl-chip-icon">📈</span>
+            <div className="bridge-ghl-chip-info">
+              <span className="bridge-ghl-chip-label">Open Opps</span>
+              <span className="bridge-ghl-chip-value">{ghlStats.opportunities?.openCount ?? '—'}</span>
+            </div>
+          </div>
+          <div className="bridge-ghl-chip">
+            <span className="bridge-ghl-chip-icon">💰</span>
+            <div className="bridge-ghl-chip-info">
+              <span className="bridge-ghl-chip-label">Pipeline</span>
+              <span className="bridge-ghl-chip-value">
+                ${ghlStats.opportunities?.totalValue
+                  ? (ghlStats.opportunities.totalValue / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                  : '—'}
+              </span>
+            </div>
+          </div>
+          {ghlStats.pipelines?.map(p => (
+            <div className="bridge-ghl-chip" key={p.id}>
+              <span className="bridge-ghl-chip-icon">🔄</span>
+              <div className="bridge-ghl-chip-info">
+                <span className="bridge-ghl-chip-label">{p.name}</span>
+                <span className="bridge-ghl-chip-value">{p.opportunityCount} opps</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="bridge-main">
         <HexGrid agents={externalAgents} onDrill={onDrill} />

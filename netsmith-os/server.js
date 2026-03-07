@@ -17,6 +17,10 @@ import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+// ─── Phase 2: Chat Channels — SQLite persistence ────────────────────────────
+import BetterSqlite3 from 'better-sqlite3';
+import crypto from 'crypto';
+
 
 const execFileAsync = promisify(execFile);
 
@@ -95,6 +99,149 @@ try {
 const cliCache = new Map();
 const CLI_CACHE_TTL = 30_000; // 30 seconds — SSE pushes realtime updates // 10 seconds
 
+// Track recently-stopped agents to override status to 'idle' immediately
+const stoppedAgents = new Map(); // agentId -> timestamp
+function markAgentStopped(agentId) {
+  stoppedAgents.set(agentId, Date.now());
+  // Auto-clear after 5 minutes
+  setTimeout(() => stoppedAgents.delete(agentId), 5 * 60 * 1000);
+}
+function isAgentRecentlyStopped(agentId) {
+  const ts = stoppedAgents.get(agentId);
+  if (!ts) return false;
+  if (Date.now() - ts > 5 * 60 * 1000) {
+    stoppedAgents.delete(agentId);
+    return false;
+  }
+  return true;
+}
+
+
+
+// ─── Phase 2: Chat Channels — SQLite database ──────────────────────────────
+
+const CHAT_DB_PATH = join(HOME, '.netsmith', 'chat.db');
+
+function initChatDB() {
+  // Ensure directory exists
+  const dbDir = join(HOME, '.netsmith');
+  try { execSync(`mkdir -p "${dbDir}"`); } catch {}
+
+  const db = new BetterSqlite3(CHAT_DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS channels (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'group',
+      description TEXT,
+      participants TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL,
+      last_message_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      parent_id TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (channel_id) REFERENCES channels(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id);
+  `);
+
+  // Seed default channels if empty
+  const count = db.prepare('SELECT COUNT(*) as c FROM channels').get();
+  if (count.c === 0) {
+    console.log('[chat] Seeding default channels...');
+    const now = Date.now();
+    const insert = db.prepare('INSERT INTO channels (id, name, type, description, participants, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+
+    const seed = db.transaction(() => {
+      insert.run('general', '#general', 'group', 'Company-wide discussion', JSON.stringify(['main','elon','gary','warren','steve','noah','clay','calvin','human']), now);
+      insert.run('strategy', '#strategy', 'group', 'Strategy and planning', JSON.stringify(['main','elon','warren','human']), now);
+      insert.run('engineering', '#engineering', 'group', 'Engineering and technical', JSON.stringify(['elon','human']), now);
+      insert.run('dm-main', 'Tim', 'direct', null, JSON.stringify(['main','human']), now);
+      insert.run('dm-elon', 'Elon', 'direct', null, JSON.stringify(['elon','human']), now);
+      insert.run('dm-gary', 'Gary', 'direct', null, JSON.stringify(['gary','human']), now);
+      insert.run('dm-warren', 'Warren', 'direct', null, JSON.stringify(['warren','human']), now);
+      insert.run('dm-steve', 'Steve', 'direct', null, JSON.stringify(['steve','human']), now);
+      insert.run('dm-noah', 'Noah', 'direct', null, JSON.stringify(['noah','human']), now);
+    });
+    seed();
+    console.log('[chat] Default channels seeded.');
+  }
+
+  return db;
+}
+
+const chatDB = initChatDB();
+
+// SSE clients per channel
+const channelStreamClients = new Map(); // channelId -> Set<res>
+
+function broadcastChannelMessage(channelId, message) {
+  const clients = channelStreamClients.get(channelId);
+  if (!clients || clients.size === 0) return;
+  const data = JSON.stringify(message);
+  for (const res of clients) {
+    try {
+      res.write(`data: ${data}\n\n`);
+    } catch {
+      clients.delete(res);
+    }
+  }
+}
+
+// Agent routing for group channels
+function routeGroupMessage(content, participants) {
+  // Check @mentions first
+  const mentionMatch = content.match(/@(\w+)/g);
+  if (mentionMatch) {
+    for (const mention of mentionMatch) {
+      const name = mention.slice(1).toLowerCase();
+      // Match against agent IDs and names
+      for (const [id, meta] of Object.entries(AGENT_META)) {
+        if (id === 'tim') continue; // skip alias
+        if (id === name || meta.name.toLowerCase() === name) {
+          if (participants.includes(id) || (id === 'main' && participants.includes('main'))) {
+            return id;
+          }
+        }
+      }
+    }
+  }
+
+  // Keyword matching
+  const lower = content.toLowerCase();
+  const keywordMap = [
+    { keywords: ['code', 'build', 'tech', 'bug', 'deploy', 'server', 'api', 'database', 'engineering'], agent: 'elon' },
+    { keywords: ['marketing', 'social', 'brand', 'content', 'campaign', 'audience', 'viral'], agent: 'gary' },
+    { keywords: ['revenue', 'sales', 'money', 'profit', 'invest', 'financial', 'cost', 'budget'], agent: 'warren' },
+    { keywords: ['growth', 'seo', 'traffic', 'analytics', 'funnel', 'conversion'], agent: 'noah' },
+    { keywords: ['product', 'design', 'user', 'ux', 'feature', 'roadmap'], agent: 'steve' },
+    { keywords: ['strategy', 'plan', 'vision', 'goal', 'objective', 'direction', 'priority'], agent: 'main' },
+  ];
+
+  for (const { keywords, agent } of keywordMap) {
+    if (participants.includes(agent) && keywords.some(kw => lower.includes(kw))) {
+      return agent;
+    }
+  }
+
+  // Default: first non-human participant
+  const agentParticipants = participants.filter(p => p !== 'human');
+  return agentParticipants.length > 0 ? agentParticipants[0] : null;
+}
+
+
 async function cachedExec(command, args, cacheKey) {
   const now = Date.now();
   const cached = cliCache.get(cacheKey);
@@ -127,20 +274,43 @@ const sseClients = new Set();
 // ─── Model name normalization ───────────────────────────────────────────────────
 function normalizeModelName(model) {
   if (!model) return 'unknown';
-  // Strip provider prefixes
-  let name = model.replace(/^(openrouter\/|anthropic\/|google\/|openai\/)/, '');
-  // Map common short names to full pricing keys
+  // Strip provider prefixes (openrouter/anthropic/google/openai/deepseek)
+  let name = model.replace(/^(openrouter\/|anthropic\/|google\/|openai\/|deepseek\/)/, '');
+  // Also strip secondary provider prefix (e.g., "openrouter/anthropic/claude..." → "claude...")
+  name = name.replace(/^(anthropic\/|google\/|openai\/|deepseek\/)/, '');
+  // Map common short/versioned names to full pricing keys
   const aliases = {
+    // Claude Opus variants
+    'claude-opus-4-6': 'claude-opus-4-6-20250514',
+    'claude-opus-4-6-20250514': 'claude-opus-4-6-20250514',
     'claude-opus-4-5': 'claude-opus-4-5-20250120',
+    'claude-opus-4-5-20250120': 'claude-opus-4-5-20250120',
     'claude-opus-4': 'claude-opus-4-20250514',
-    'claude-sonnet-4': 'claude-sonnet-4-20250514',
+    'claude-opus-4-20250514': 'claude-opus-4-20250514',
+    // Claude Sonnet variants
     'claude-sonnet-4-6': 'claude-sonnet-4-6-20250514',
+    'claude-sonnet-4-6-20250514': 'claude-sonnet-4-6-20250514',
+    'claude-sonnet-4': 'claude-sonnet-4-20250514',
+    'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514',
+    // Claude Haiku
     'claude-haiku-3': 'claude-haiku-3-20250307',
+    'claude-haiku-3-20250307': 'claude-haiku-3-20250307',
+    // Gemini
     'gemini-2.5-flash': 'gemini-2.5-flash',
-    'gemini-flash-2.0': 'gemini-2.5-flash',
+    'gemini-flash-2.5': 'gemini-2.5-flash',
+    'gemini-2.5-flash-preview': 'gemini-2.5-flash',
     'gemini-2.5-pro': 'gemini-2.5-pro',
+    'gemini-2.0-flash': 'gemini-2.0-flash',
+    'gemini-flash-2.0': 'gemini-2.0-flash',
+    'gemini-2.0-flash-001': 'gemini-2.0-flash',
+    // GPT
     'gpt-4o': 'gpt-4o',
     'gpt-4o-mini': 'gpt-4o-mini',
+    // DeepSeek
+    'deepseek-chat': 'deepseek-v3',
+    'deepseek-v3': 'deepseek-v3',
+    'deepseek-reasoner': 'deepseek-r1',
+    'deepseek-r1': 'deepseek-r1',
   };
   return aliases[name] || name;
 }
@@ -150,9 +320,30 @@ function calculateRunCost(run) {
   const modelKey = normalizeModelName(run.model);
   const rates = PRICING[modelKey];
   if (!rates || !run.usage) return 0;
-  const inputCost = (run.usage.input_tokens || 0) / 1_000_000 * rates.input;
-  const outputCost = (run.usage.output_tokens || 0) / 1_000_000 * rates.output;
-  return inputCost + outputCost;
+
+  const inputTokens = run.usage.input_tokens || 0;
+  const outputTokens = run.usage.output_tokens || 0;
+  const totalTokens = run.usage.total_tokens || 0;
+  const cachedInputTokens = run.usage.cached_input_tokens || run.usage.cache_read_input_tokens || 0;
+
+  // Estimate thinking tokens: total - input - output (if total is larger)
+  // Many models with extended thinking report total > input + output
+  let thinkingTokens = 0;
+  if (totalTokens > inputTokens + outputTokens) {
+    thinkingTokens = totalTokens - inputTokens - outputTokens;
+  }
+
+  // Cached input tokens are cheaper (use cached_input rate if available)
+  const regularInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+  const cachedRate = rates.cached_input || rates.input;
+
+  const inputCost = regularInputTokens / 1_000_000 * rates.input;
+  const cachedCost = cachedInputTokens / 1_000_000 * cachedRate;
+  const outputCost = outputTokens / 1_000_000 * rates.output;
+  const thinkingRate = rates.thinking || rates.output; // fallback to output rate
+  const thinkingCost = thinkingTokens / 1_000_000 * thinkingRate;
+
+  return inputCost + cachedCost + outputCost + thinkingCost;
 }
 
 async function readAllCronRuns() {
@@ -814,12 +1005,17 @@ app.get('/api/agents', async (req, res) => {
 
       // Determine status: if heartbeat enabled and has recent session, it's active
       let status = 'idle';
-      if (ha.enabled) {
-        status = 'active';
-      }
-      if (latestSession) {
-        const ageMinutes = (latestSession.ageMs || Infinity) / (1000 * 60);
-        if (ageMinutes < 5) status = 'busy';
+      if (isAgentRecentlyStopped(agentId)) {
+        // Agent was recently stopped — force idle regardless of session age
+        status = 'idle';
+      } else {
+        if (ha.enabled) {
+          status = 'active';
+        }
+        if (latestSession) {
+          const ageMinutes = (latestSession.ageMs || Infinity) / (1000 * 60);
+          if (ageMinutes < 5) status = 'busy';
+        }
       }
 
       const meta = AGENT_META[agentId] || { name: agentId, role: 'Agent', emoji: '🤖' };
@@ -857,6 +1053,40 @@ app.get('/api/agents/:id/sessions', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to get sessions', details: err.message });
+  }
+});
+
+
+// GET /api/costs/debug — Debug endpoint to verify cost calculation
+app.get('/api/costs/debug', async (req, res) => {
+  try {
+    const runs = await readAllCronRuns();
+    const debugRuns = runs
+      .filter(r => r.action === 'finished' && r.usage)
+      .slice(-20)
+      .map(r => {
+        const modelKey = normalizeModelName(r.model);
+        const rates = PRICING[modelKey];
+        const inputTokens = r.usage.input_tokens || 0;
+        const outputTokens = r.usage.output_tokens || 0;
+        const totalTokens = r.usage.total_tokens || 0;
+        const thinkingTokens = totalTokens > inputTokens + outputTokens
+          ? totalTokens - inputTokens - outputTokens : 0;
+        return {
+          model: r.model,
+          normalizedModel: modelKey,
+          provider: r.provider,
+          agent: r.sessionKey ? r.sessionKey.split(':')[1] : 'unknown',
+          hasRates: !!rates,
+          rates: rates || null,
+          tokens: { input: inputTokens, output: outputTokens, total: totalTokens, thinking: thinkingTokens },
+          cost: calculateRunCost(r),
+          ts: r.ts,
+        };
+      });
+    res.json({ runs: debugRuns, pricingKeys: Object.keys(PRICING) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1790,22 +2020,52 @@ app.patch('/api/agents/:id/thinking', express.json(), async (req, res) => {
 app.post('/api/agents/:id/stop', async (req, res) => {
   const { id } = req.params;
   if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
-  
+
+  let stopped = false;
+  const errors = [];
+
+  // Method 1: Try runs.stop via gateway RPC
   try {
-    // Use the sessions command to check if the agent has active runs, then cancel
-    const output = execSync(`openclaw sessions --agent ${id} --json`, { encoding: 'utf8', timeout: 10000 });
-    // The stop is best-effort - we try to interrupt via the gateway
-    try {
-      execSync(`openclaw gateway rpc runs.stop --agent ${id}`, { encoding: 'utf8', timeout: 10000 });
-    } catch {
-      // Fallback: some versions may not support this exact command
-    }
-    cliCache.clear();
-    res.json({ success: true, agentId: id, message: 'Stop signal sent' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to stop agent', details: err.message });
+    execSync(`openclaw gateway rpc runs.stop --agent ${id}`, { encoding: 'utf8', timeout: 10000 });
+    stopped = true;
+  } catch (e) {
+    errors.push('runs.stop: ' + (e.message || 'failed'));
   }
+
+  // Method 2: Try canceling active sessions directly
+  try {
+    const sessOut = execSync(`openclaw sessions --agent ${id} --json`, { encoding: 'utf8', timeout: 10000 });
+    const sessData = JSON.parse(sessOut);
+    const activeSessions = (sessData.sessions || []).filter(s => {
+      const ageMin = (s.ageMs || Infinity) / (1000 * 60);
+      return ageMin < 5;
+    });
+    for (const sess of activeSessions) {
+      try {
+        execSync(`openclaw session cancel ${sess.sessionId || sess.id} --agent ${id}`, { encoding: 'utf8', timeout: 5000 });
+        stopped = true;
+      } catch {
+        // Individual session cancel may not be supported
+      }
+    }
+  } catch (e) {
+    errors.push('session cancel: ' + (e.message || 'failed'));
+  }
+
+  // Regardless of whether commands succeeded, mark agent as stopped
+  // This overrides the status derivation to show 'idle' immediately
+  markAgentStopped(id);
+  cliCache.clear();
+
+  res.json({
+    success: true,
+    agentId: id,
+    status: 'idle',
+    message: stopped ? 'Agent stopped successfully' : 'Stop signal sent (best-effort)',
+    warnings: errors.length > 0 ? errors : undefined
+  });
 });
+
 
 app.patch('/api/agents/:id/rename', express.json(), async (req, res) => {
   const { id } = req.params;
@@ -1918,6 +2178,302 @@ app.get('/api/agents/:id/config', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to get agent config', details: err.message });
   }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 2: CHANNEL & MESSAGE ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/channels — list all channels with last message
+app.get('/api/channels', (req, res) => {
+  try {
+    const channels = chatDB.prepare(`
+      SELECT c.*, m.content as last_msg_content, m.sender_name as last_msg_sender, m.created_at as last_msg_at
+      FROM channels c
+      LEFT JOIN messages m ON m.channel_id = c.id AND m.created_at = c.last_message_at
+      ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
+    `).all();
+
+    const result = channels.map(ch => ({
+      id: ch.id,
+      name: ch.name,
+      type: ch.type,
+      description: ch.description,
+      participants: JSON.parse(ch.participants),
+      created_at: ch.created_at,
+      last_message_at: ch.last_message_at,
+      lastMessage: ch.last_msg_content ? {
+        content: ch.last_msg_content,
+        sender_name: ch.last_msg_sender,
+        created_at: ch.last_msg_at,
+      } : null,
+    }));
+
+    res.json({ channels: result });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list channels', details: err.message });
+  }
+});
+
+// POST /api/channels — create a new channel
+app.post('/api/channels', (req, res) => {
+  try {
+    const { name, type, participants, description } = req.body;
+    if (!name || !type) {
+      return res.status(400).json({ error: 'name and type are required' });
+    }
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const now = Date.now();
+    chatDB.prepare('INSERT INTO channels (id, name, type, description, participants, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, name, type || 'group', description || null, JSON.stringify(participants || []), now);
+
+    const channel = chatDB.prepare('SELECT * FROM channels WHERE id = ?').get(id);
+    res.json({
+      ...channel,
+      participants: JSON.parse(channel.participants),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create channel', details: err.message });
+  }
+});
+
+// GET /api/channels/:id/messages — paginated messages (newest first)
+app.get('/api/channels/:id/messages', (req, res) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const before = req.query.before ? parseInt(req.query.before) : null;
+
+    let messages;
+    if (before) {
+      messages = chatDB.prepare(
+        'SELECT * FROM messages WHERE channel_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?'
+      ).all(id, before, limit);
+    } else {
+      messages = chatDB.prepare(
+        'SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ?'
+      ).all(id, limit);
+    }
+
+    // Return in chronological order (oldest first) for display
+    messages.reverse();
+    const hasMore = messages.length === limit;
+
+    res.json({ messages, hasMore });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get messages', details: err.message });
+  }
+});
+
+// POST /api/channels/:id/messages — send a message and get agent response
+app.post('/api/channels/:id/messages', async (req, res) => {
+  try {
+    const { id: channelId } = req.params;
+    const { content, parentId } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'content is required' });
+    }
+
+    const channel = chatDB.prepare('SELECT * FROM channels WHERE id = ?').get(channelId);
+    if (!channel) {
+      return res.status(404).json({ error: 'Channel not found' });
+    }
+
+    const participants = JSON.parse(channel.participants);
+    const now = Date.now();
+
+    // Store human message
+    const humanMsgId = crypto.randomUUID();
+    chatDB.prepare(
+      'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(humanMsgId, channelId, 'human', 'You', content.trim(), parentId || null, now);
+
+    // Update channel last_message_at
+    chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(now, channelId);
+
+    const humanMsg = {
+      id: humanMsgId,
+      channel_id: channelId,
+      sender_id: 'human',
+      sender_name: 'You',
+      content: content.trim(),
+      parent_id: parentId || null,
+      created_at: now,
+    };
+
+    // Broadcast human message via SSE
+    broadcastChannelMessage(channelId, { type: 'message', message: humanMsg });
+
+    // Determine which agent to route to
+    let targetAgent = null;
+
+    if (channel.type === 'direct') {
+      // Direct channel: route to the single agent participant
+      targetAgent = participants.find(p => p !== 'human') || null;
+    } else if (channel.type === 'group') {
+      targetAgent = routeGroupMessage(content, participants);
+    }
+
+    if (!targetAgent) {
+      return res.json({ message: humanMsg, agentResponse: null });
+    }
+
+    const meta = AGENT_META[targetAgent];
+    if (!meta) {
+      return res.json({ message: humanMsg, agentResponse: null });
+    }
+
+    // Build context from last 5 messages
+    const recentMsgs = chatDB.prepare(
+      'SELECT sender_name, content FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT 5'
+    ).all(channelId);
+    recentMsgs.reverse();
+
+    const contextStr = recentMsgs
+      .map(m => `${m.sender_name}: ${m.content}`)
+      .join('\n');
+
+    // Call agent
+    let agentResponse = null;
+    try {
+      const thinkingLevel = await getAgentPref(targetAgent, 'thinkingLevel', 'default');
+      const thinkingArgs = thinkingLevel && thinkingLevel !== 'none' && thinkingLevel !== 'default'
+        ? ['--thinking', thinkingLevel]
+        : [];
+
+      const { stdout, stderr } = await execFileAsync('openclaw', [
+        'agent',
+        '--agent', targetAgent,
+        '--message', contextStr,
+        '--json',
+        '--timeout', '120',
+        ...thinkingArgs,
+      ], { timeout: 130000, maxBuffer: 10 * 1024 * 1024 });
+
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        parsed = null;
+      }
+
+      let responseText = stdout.trim();
+      if (parsed) {
+        if (parsed.result && parsed.result.payloads && parsed.result.payloads[0]) {
+          responseText = parsed.result.payloads[0].text || responseText;
+        } else if (parsed.response) {
+          responseText = parsed.response;
+        } else if (parsed.content) {
+          responseText = parsed.content;
+        } else if (parsed.text) {
+          responseText = parsed.text;
+        }
+      }
+
+      if (responseText) {
+        const agentMsgId = crypto.randomUUID();
+        const agentTs = Date.now();
+
+        chatDB.prepare(
+          'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(agentMsgId, channelId, targetAgent, meta.name, responseText, parentId || null, agentTs);
+
+        chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(agentTs, channelId);
+
+        agentResponse = {
+          id: agentMsgId,
+          channel_id: channelId,
+          sender_id: targetAgent,
+          sender_name: meta.name,
+          content: responseText,
+          parent_id: parentId || null,
+          created_at: agentTs,
+        };
+
+        // Broadcast agent response via SSE
+        broadcastChannelMessage(channelId, { type: 'message', message: agentResponse });
+
+        // Also broadcast to thought stream
+        const tsClients = thoughtStreamClients.get(targetAgent);
+        if (tsClients && tsClients.size > 0) {
+          const thought = JSON.stringify({
+            type: 'thought',
+            agentId: targetAgent,
+            ts: agentTs,
+            level: 'info',
+            event: 'channel_response',
+            message: `[#${channel.name}] ${responseText.slice(0, 200)}`,
+          });
+          for (const client of tsClients) {
+            try { client.write(`data: ${thought}\n\n`); } catch {}
+          }
+        }
+      }
+    } catch (agentErr) {
+      console.error(`[chat] Agent ${targetAgent} error:`, agentErr.message);
+      // Store error as system message
+      const errMsgId = crypto.randomUUID();
+      const errTs = Date.now();
+      const errContent = `[System] ${meta.name} is unavailable: ${agentErr.message.slice(0, 200)}`;
+
+      chatDB.prepare(
+        'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).run(errMsgId, channelId, 'system', 'System', errContent, null, errTs);
+
+      broadcastChannelMessage(channelId, {
+        type: 'message',
+        message: {
+          id: errMsgId, channel_id: channelId, sender_id: 'system',
+          sender_name: 'System', content: errContent, parent_id: null, created_at: errTs,
+        }
+      });
+
+      agentResponse = {
+        id: errMsgId, channel_id: channelId, sender_id: 'system',
+        sender_name: 'System', content: errContent, parent_id: null, created_at: errTs,
+      };
+    }
+
+    res.json({ message: humanMsg, agentResponse });
+  } catch (err) {
+    console.error('[chat] Message error:', err);
+    res.status(500).json({ error: 'Failed to send message', details: err.message });
+  }
+});
+
+// GET /api/channels/:id/stream — SSE for real-time channel messages
+app.get('/api/channels/:id/stream', (req, res) => {
+  const { id } = req.params;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write('data: ' + JSON.stringify({ type: 'connected', channelId: id, ts: Date.now() }) + '\n\n');
+
+  if (!channelStreamClients.has(id)) {
+    channelStreamClients.set(id, new Set());
+  }
+  channelStreamClients.get(id).add(res);
+
+  // Send keepalive every 30s
+  const keepalive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    const clients = channelStreamClients.get(id);
+    if (clients) {
+      clients.delete(res);
+      if (clients.size === 0) channelStreamClients.delete(id);
+    }
+  });
 });
 
 // ─── CHAT — Send message to agent and get response ─────────────────────────
@@ -2371,6 +2927,786 @@ function startChannelWatcher() {
     pollChannelSessions().catch(() => {});
   }, 8000);
 }
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 3: GROUP MEETINGS ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// In-memory meeting state (meetings are also persisted as channels/messages in SQLite)
+const activeMeetings = new Map(); // meetingId -> MeetingState
+const meetingStreamClients = new Map(); // meetingId -> Set<res>
+
+class MeetingState {
+  constructor(id, topic, participants, channelId) {
+    this.id = id;
+    this.topic = topic;
+    this.participants = participants; // agent IDs only (no 'human')
+    this.channelId = channelId;
+    this.state = 'active'; // 'active' | 'paused' | 'complete'
+    this.messages = []; // in-memory copy for context building
+    this.currentSpeaker = null;
+    this.speakerQueue = [...participants]; // agents yet to speak in current round
+    this.round = 1;
+    this.humanInterjection = null; // pending human message to process
+    this.abortController = null; // to cancel current agent call
+    this.isProcessing = false;
+    this.startedAt = Date.now();
+  }
+
+  addMessage(senderId, senderName, content, role = 'assistant') {
+    this.messages.push({ senderId, senderName, content, role, ts: Date.now() });
+  }
+
+  buildContext() {
+    // Build conversation context string for agent prompts
+    let ctx = `MEETING TOPIC: ${this.topic}\n`;
+    ctx += `PARTICIPANTS: ${this.participants.map(p => {
+      const m = AGENT_META[p];
+      return m ? m.name + ' (' + m.role + ')' : p;
+    }).join(', ')} and Brandon (CEO)\n`;
+    ctx += `ROUND: ${this.round}\n\n`;
+    ctx += `CONVERSATION SO FAR:\n`;
+
+    for (const msg of this.messages.slice(-20)) {
+      ctx += `${msg.senderName}: ${msg.content}\n\n`;
+    }
+
+    return ctx;
+  }
+}
+
+function broadcastMeetingEvent(meetingId, event) {
+  const clients = meetingStreamClients.get(meetingId);
+  if (!clients || clients.size === 0) return;
+  const data = JSON.stringify(event);
+  for (const res of clients) {
+    try {
+      res.write(`data: ${data}\n\n`);
+    } catch {
+      clients.delete(res);
+    }
+  }
+  // Also broadcast to the channel SSE
+  const meeting = activeMeetings.get(meetingId);
+  if (meeting && meeting.channelId) {
+    broadcastChannelMessage(meeting.channelId, event);
+  }
+}
+
+async function runMeetingAgent(meeting, agentId) {
+  if (meeting.state !== 'active') return;
+
+  const meta = AGENT_META[agentId];
+  if (!meta) return;
+
+  meeting.currentSpeaker = agentId;
+
+  // Broadcast speaking indicator
+  broadcastMeetingEvent(meeting.id, {
+    type: 'speaking',
+    agentId,
+    agentName: meta.name,
+    ts: Date.now(),
+  });
+
+  try {
+    const context = meeting.buildContext();
+    const prompt = context + `\nYou are ${meta.name} (${meta.role}). Share your perspective on this topic. Be concise (2-4 paragraphs). Respond directly to what others have said. If Brandon (the CEO) has spoken, address his points specifically.`;
+
+    const thinkingLevel = await getAgentPref(agentId, 'thinkingLevel', 'default');
+    const thinkingArgs = thinkingLevel && thinkingLevel !== 'none' && thinkingLevel !== 'default'
+      ? ['--thinking', thinkingLevel]
+      : [];
+
+    const { stdout } = await execFileAsync('openclaw', [
+      'agent',
+      '--agent', agentId,
+      '--message', prompt,
+      '--json',
+      '--timeout', '120',
+      ...thinkingArgs,
+    ], { timeout: 130000, maxBuffer: 10 * 1024 * 1024 });
+
+    if (meeting.state !== 'active') return; // meeting may have ended during agent call
+
+    let parsed;
+    try { parsed = JSON.parse(stdout); } catch { parsed = null; }
+
+    let responseText = stdout.trim();
+    if (parsed) {
+      if (parsed.result && parsed.result.payloads && parsed.result.payloads[0]) {
+        responseText = parsed.result.payloads[0].text || responseText;
+      } else if (parsed.response) {
+        responseText = parsed.response;
+      } else if (parsed.content) {
+        responseText = parsed.content;
+      } else if (parsed.text) {
+        responseText = parsed.text;
+      }
+    }
+
+    // Store in SQLite
+    const msgId = crypto.randomUUID();
+    const msgTs = Date.now();
+    chatDB.prepare(
+      'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(msgId, meeting.channelId, agentId, meta.name, responseText, null, msgTs);
+    chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(msgTs, meeting.channelId);
+
+    // Add to in-memory context
+    meeting.addMessage(agentId, meta.name, responseText);
+
+    // Broadcast message
+    broadcastMeetingEvent(meeting.id, {
+      type: 'message',
+      message: {
+        id: msgId,
+        channel_id: meeting.channelId,
+        sender_id: agentId,
+        sender_name: meta.name,
+        content: responseText,
+        parent_id: null,
+        created_at: msgTs,
+      },
+    });
+  } catch (err) {
+    console.error(`[meeting] Agent ${agentId} error:`, err.message);
+    const errId = crypto.randomUUID();
+    const errTs = Date.now();
+    const errContent = `[System] ${meta.name} encountered an error: ${err.message.slice(0, 200)}`;
+
+    chatDB.prepare(
+      'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(errId, meeting.channelId, 'system', 'System', errContent, null, errTs);
+
+    broadcastMeetingEvent(meeting.id, {
+      type: 'message',
+      message: {
+        id: errId, channel_id: meeting.channelId, sender_id: 'system',
+        sender_name: 'System', content: errContent, parent_id: null, created_at: errTs,
+      },
+    });
+  }
+
+  meeting.currentSpeaker = null;
+}
+
+async function runMeetingLoop(meetingId) {
+  const meeting = activeMeetings.get(meetingId);
+  if (!meeting || meeting.state !== 'active') return;
+
+  meeting.isProcessing = true;
+
+  // Initial opening message
+  const openId = crypto.randomUUID();
+  const openTs = Date.now();
+  const openContent = `Meeting started: "${meeting.topic}"\nParticipants: ${meeting.participants.map(p => AGENT_META[p]?.name || p).join(', ')} and Brandon`;
+
+  chatDB.prepare(
+    'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(openId, meeting.channelId, 'system', 'System', openContent, null, openTs);
+  chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(openTs, meeting.channelId);
+
+  meeting.addMessage('system', 'System', openContent, 'system');
+
+  broadcastMeetingEvent(meetingId, {
+    type: 'message',
+    message: {
+      id: openId, channel_id: meeting.channelId, sender_id: 'system',
+      sender_name: 'System', content: openContent, parent_id: null, created_at: openTs,
+    },
+  });
+
+  // Run agents sequentially through the queue
+  while (meeting.state === 'active' && meeting.speakerQueue.length > 0) {
+    // Check for human interjection before each speaker
+    if (meeting.humanInterjection) {
+      const humanMsg = meeting.humanInterjection;
+      meeting.humanInterjection = null;
+      meeting.addMessage('human', 'Brandon', humanMsg, 'user');
+    }
+
+    const nextAgent = meeting.speakerQueue.shift();
+    await runMeetingAgent(meeting, nextAgent);
+
+    // Small delay between speakers for readability
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Check for human interjection after each speaker
+    if (meeting.humanInterjection) {
+      const humanMsg = meeting.humanInterjection;
+      meeting.humanInterjection = null;
+      meeting.addMessage('human', 'Brandon', humanMsg, 'user');
+    }
+  }
+
+  // Round complete — check if meeting should continue or end
+  if (meeting.state === 'active') {
+    if (meeting.round < 3) {
+      // Start another round
+      meeting.round++;
+      meeting.speakerQueue = [...meeting.participants];
+
+      broadcastMeetingEvent(meetingId, {
+        type: 'round',
+        round: meeting.round,
+        ts: Date.now(),
+      });
+
+      // Recursive call for next round
+      await runMeetingLoop(meetingId);
+    } else {
+      // 3 rounds done — auto-complete
+      await completeMeeting(meetingId);
+    }
+  }
+
+  meeting.isProcessing = false;
+}
+
+async function completeMeeting(meetingId) {
+  const meeting = activeMeetings.get(meetingId);
+  if (!meeting) return;
+
+  meeting.state = 'complete';
+  meeting.currentSpeaker = null;
+
+  // Generate summary using Tim (main agent)
+  let summary = 'Meeting concluded.';
+  try {
+    const summaryPrompt = meeting.buildContext() + `\n\nYou are Tim, the COO. Please provide a brief meeting summary with:\n1. Key decisions made\n2. Action items (who is responsible for what)\n3. Any unresolved issues\n\nKeep it concise and actionable.`;
+
+    const { stdout } = await execFileAsync('openclaw', [
+      'agent', '--agent', 'main',
+      '--message', summaryPrompt,
+      '--json', '--timeout', '120',
+    ], { timeout: 130000, maxBuffer: 10 * 1024 * 1024 });
+
+    let parsed;
+    try { parsed = JSON.parse(stdout); } catch { parsed = null; }
+    if (parsed && parsed.result && parsed.result.payloads && parsed.result.payloads[0]) {
+      summary = parsed.result.payloads[0].text || summary;
+    } else if (parsed && parsed.response) {
+      summary = parsed.response;
+    }
+  } catch (err) {
+    console.error('[meeting] Summary generation error:', err.message);
+    summary = 'Meeting concluded. Summary generation failed.';
+  }
+
+  // Store summary
+  const sumId = crypto.randomUUID();
+  const sumTs = Date.now();
+  const sumContent = `📋 **Meeting Summary**\n\n${summary}`;
+
+  chatDB.prepare(
+    'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(sumId, meeting.channelId, 'system', 'Meeting Summary', sumContent, null, sumTs);
+  chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(sumTs, meeting.channelId);
+
+  broadcastMeetingEvent(meetingId, {
+    type: 'complete',
+    summary: sumContent,
+    message: {
+      id: sumId, channel_id: meeting.channelId, sender_id: 'system',
+      sender_name: 'Meeting Summary', content: sumContent, parent_id: null, created_at: sumTs,
+    },
+    ts: sumTs,
+  });
+
+  // Clean up after 5 min
+  setTimeout(() => {
+    activeMeetings.delete(meetingId);
+    meetingStreamClients.delete(meetingId);
+  }, 5 * 60 * 1000);
+}
+
+// ─── Meeting API Endpoints ─────────────────────────────────────────────────
+
+// POST /api/meetings — create and start a meeting
+app.post('/api/meetings', async (req, res) => {
+  try {
+    const { topic, participants } = req.body;
+    if (!topic || !participants || !Array.isArray(participants) || participants.length === 0) {
+      return res.status(400).json({ error: 'topic and participants[] are required' });
+    }
+
+    // Filter to valid agent IDs
+    const validAgents = participants.filter(p => p !== 'human' && AGENT_META[p]);
+    if (validAgents.length === 0) {
+      return res.status(400).json({ error: 'No valid agent participants' });
+    }
+
+    const meetingId = crypto.randomUUID();
+    const channelId = `meeting-${meetingId.slice(0, 8)}`;
+    const now = Date.now();
+
+    // Create channel in SQLite
+    const channelName = `Meeting: ${topic.slice(0, 50)}`;
+    chatDB.prepare(
+      'INSERT INTO channels (id, name, type, description, participants, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(channelId, channelName, 'meeting', topic, JSON.stringify([...validAgents, 'human']), now);
+
+    // Create in-memory meeting state
+    const meeting = new MeetingState(meetingId, topic, validAgents, channelId);
+    activeMeetings.set(meetingId, meeting);
+
+    res.json({
+      id: meetingId,
+      channelId,
+      topic,
+      participants: validAgents,
+      state: 'active',
+      round: 1,
+      startedAt: now,
+    });
+
+    // Start the meeting loop asynchronously
+    setImmediate(() => runMeetingLoop(meetingId).catch(err => {
+      console.error('[meeting] Loop error:', err);
+    }));
+  } catch (err) {
+    console.error('[meeting] Create error:', err);
+    res.status(500).json({ error: 'Failed to create meeting', details: err.message });
+  }
+});
+
+// GET /api/meetings — list all meetings (active + recent completed)
+app.get('/api/meetings', (req, res) => {
+  try {
+    // Get meeting channels
+    const channels = chatDB.prepare(
+      "SELECT * FROM channels WHERE type = 'meeting' ORDER BY created_at DESC LIMIT 50"
+    ).all();
+
+    const meetings = channels.map(ch => {
+      const active = Array.from(activeMeetings.values()).find(m => m.channelId === ch.id);
+      return {
+        id: active ? active.id : ch.id,
+        channelId: ch.id,
+        topic: ch.description || ch.name,
+        participants: JSON.parse(ch.participants).filter(p => p !== 'human'),
+        state: active ? active.state : 'complete',
+        round: active ? active.round : null,
+        currentSpeaker: active ? active.currentSpeaker : null,
+        startedAt: ch.created_at,
+        lastMessageAt: ch.last_message_at,
+      };
+    });
+
+    res.json({ meetings });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list meetings', details: err.message });
+  }
+});
+
+// GET /api/meetings/:id — get meeting details + messages
+app.get('/api/meetings/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const meeting = activeMeetings.get(id);
+
+    // Try to find by meetingId or channelId
+    let channelId = meeting ? meeting.channelId : id;
+    if (!meeting) {
+      // Check if id is a channelId directly
+      const ch = chatDB.prepare('SELECT * FROM channels WHERE id = ?').get(id);
+      if (!ch) return res.status(404).json({ error: 'Meeting not found' });
+      channelId = ch.id;
+    }
+
+    const channel = chatDB.prepare('SELECT * FROM channels WHERE id = ?').get(channelId);
+    if (!channel) return res.status(404).json({ error: 'Meeting channel not found' });
+
+    const messages = chatDB.prepare(
+      'SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at ASC LIMIT 500'
+    ).all(channelId);
+
+    res.json({
+      id: meeting ? meeting.id : channel.id,
+      channelId,
+      topic: channel.description || channel.name,
+      participants: JSON.parse(channel.participants).filter(p => p !== 'human'),
+      state: meeting ? meeting.state : 'complete',
+      round: meeting ? meeting.round : null,
+      currentSpeaker: meeting ? meeting.currentSpeaker : null,
+      startedAt: channel.created_at,
+      messages,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get meeting', details: err.message });
+  }
+});
+
+// GET /api/meetings/:id/stream — SSE for live meeting events
+app.get('/api/meetings/:id/stream', (req, res) => {
+  const { id } = req.params;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const meeting = activeMeetings.get(id);
+  res.write('data: ' + JSON.stringify({
+    type: 'connected',
+    meetingId: id,
+    state: meeting ? meeting.state : 'unknown',
+    currentSpeaker: meeting ? meeting.currentSpeaker : null,
+    round: meeting ? meeting.round : null,
+    ts: Date.now(),
+  }) + '\n\n');
+
+  if (!meetingStreamClients.has(id)) {
+    meetingStreamClients.set(id, new Set());
+  }
+  meetingStreamClients.get(id).add(res);
+
+  const keepalive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+  }, 30000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    const clients = meetingStreamClients.get(id);
+    if (clients) {
+      clients.delete(res);
+      if (clients.size === 0) meetingStreamClients.delete(id);
+    }
+  });
+});
+
+// POST /api/meetings/:id/messages — human interjection during meeting
+app.post('/api/meetings/:id/messages', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'content is required' });
+    }
+
+    const meeting = activeMeetings.get(id);
+    if (!meeting) {
+      return res.status(404).json({ error: 'Active meeting not found' });
+    }
+
+    if (meeting.state !== 'active') {
+      return res.status(400).json({ error: 'Meeting is not active' });
+    }
+
+    // Store in SQLite
+    const msgId = crypto.randomUUID();
+    const msgTs = Date.now();
+    chatDB.prepare(
+      'INSERT INTO messages (id, channel_id, sender_id, sender_name, content, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(msgId, meeting.channelId, 'human', 'Brandon', content.trim(), null, msgTs);
+    chatDB.prepare('UPDATE channels SET last_message_at = ? WHERE id = ?').run(msgTs, meeting.channelId);
+
+    // Queue human interjection for the meeting loop to pick up
+    meeting.humanInterjection = content.trim();
+
+    const humanMsg = {
+      id: msgId,
+      channel_id: meeting.channelId,
+      sender_id: 'human',
+      sender_name: 'Brandon',
+      content: content.trim(),
+      parent_id: null,
+      created_at: msgTs,
+    };
+
+    // Broadcast immediately
+    broadcastMeetingEvent(id, { type: 'message', message: humanMsg });
+
+    res.json({ message: humanMsg });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send message', details: err.message });
+  }
+});
+
+// POST /api/meetings/:id/end — force-end meeting and generate summary
+app.post('/api/meetings/:id/end', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const meeting = activeMeetings.get(id);
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Active meeting not found' });
+    }
+
+    // Set state to trigger loop exit
+    meeting.state = 'complete';
+    meeting.speakerQueue = [];
+
+    await completeMeeting(id);
+
+    res.json({ success: true, state: 'complete' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to end meeting', details: err.message });
+  }
+});
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 5: GoHighLevel CRM Integration
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const GHL_CONFIG = {
+  baseUrl: 'https://services.leadconnectorhq.com',
+  apiToken: process.env.GHL_API_TOKEN || 'pit-49631b76-7e3e-4d60-8b01-804c386ad354',
+  apiVersion: '2021-07-28',
+  locationId: process.env.GHL_LOCATION_ID || 'GZecKV1IvZgcZdeVItxt',
+};
+
+class GHLService {
+  constructor(config) {
+    this.baseUrl = config.baseUrl;
+    this.headers = {
+      'Authorization': `Bearer ${config.apiToken}`,
+      'Version': config.apiVersion,
+      'Content-Type': 'application/json',
+    };
+    this.locationId = config.locationId;
+  }
+
+  async _request(method, path, body = null) {
+    const url = `${this.baseUrl}${path}`;
+    const opts = { method, headers: this.headers };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(url, opts);
+    const data = await res.json();
+    if (!res.ok) {
+      const msg = data.message || data.msg || JSON.stringify(data);
+      throw new Error(`GHL ${res.status}: ${msg}`);
+    }
+    return data;
+  }
+
+  // ─── Contacts ──────────────────────────────────────────────────────
+  async searchContacts(query = '', limit = 20) {
+    let path = `/contacts/?locationId=${this.locationId}&limit=${limit}`;
+    if (query) path += `&query=${encodeURIComponent(query)}`;
+    return this._request('GET', path);
+  }
+
+  async getContact(id) {
+    return this._request('GET', `/contacts/${id}`);
+  }
+
+  async createContact(data) {
+    return this._request('POST', '/contacts/', {
+      ...data,
+      locationId: this.locationId,
+    });
+  }
+
+  async updateContact(id, data) {
+    return this._request('PUT', `/contacts/${id}`, data);
+  }
+
+  // ─── Pipelines & Opportunities ─────────────────────────────────────
+  async getPipelines() {
+    return this._request('GET', `/opportunities/pipelines?locationId=${this.locationId}`);
+  }
+
+  async getOpportunities(pipelineId, options = {}) {
+    let path = `/opportunities/search?location_id=${this.locationId}&pipeline_id=${pipelineId}`;
+    if (options.status) path += `&status=${options.status}`;
+    if (options.limit) path += `&limit=${options.limit}`;
+    return this._request('GET', path);
+  }
+
+  async updateOpportunity(id, data) {
+    return this._request('PUT', `/opportunities/${id}`, data);
+  }
+
+  // ─── Custom Objects ────────────────────────────────────────────────
+  async searchCustomObjects(schemaKey, filters = {}) {
+    return this._request('POST', `/objects/${schemaKey}/records/search`, {
+      locationId: this.locationId,
+      ...filters,
+    });
+  }
+
+  // ─── Conversations ─────────────────────────────────────────────────
+  async getConversations(contactId) {
+    return this._request('GET', `/conversations/search?locationId=${this.locationId}&contactId=${contactId}`);
+  }
+
+  // ─── Aggregate Stats ──────────────────────────────────────────────
+  async getStats() {
+    const stats = {
+      contacts: { total: 0, recentCount: 0 },
+      pipelines: [],
+      opportunities: { total: 0, totalValue: 0, openCount: 0 },
+      connected: true,
+    };
+
+    try {
+      // Get contacts count
+      const contactsRes = await this.searchContacts('', 1);
+      stats.contacts.total = contactsRes.meta?.total || contactsRes.contacts?.length || 0;
+
+      // Get pipelines with opportunity counts
+      const pipelinesRes = await this.getPipelines();
+      const pipelines = pipelinesRes.pipelines || [];
+
+      for (const pipeline of pipelines) {
+        const pipelineInfo = {
+          id: pipeline.id,
+          name: pipeline.name,
+          stages: (pipeline.stages || []).map(s => ({ id: s.id, name: s.name })),
+          opportunityCount: 0,
+          totalValue: 0,
+        };
+
+        try {
+          const oppsRes = await this.getOpportunities(pipeline.id, { status: 'open', limit: 100 });
+          const opps = oppsRes.opportunities || [];
+          pipelineInfo.opportunityCount = opps.length;
+          pipelineInfo.totalValue = opps.reduce((sum, o) => sum + (o.monetaryValue || 0), 0);
+          stats.opportunities.total += opps.length;
+          stats.opportunities.totalValue += pipelineInfo.totalValue;
+          stats.opportunities.openCount += opps.filter(o => o.status === 'open').length;
+        } catch {
+          // Some pipelines may not have opportunities accessible
+        }
+
+        stats.pipelines.push(pipelineInfo);
+      }
+    } catch (err) {
+      stats.connected = false;
+      stats.error = err.message;
+    }
+
+    return stats;
+  }
+
+  // ─── Connection Test ──────────────────────────────────────────────
+  async testConnection() {
+    try {
+      const res = await this.searchContacts('', 1);
+      return {
+        connected: true,
+        locationId: this.locationId,
+        contactCount: res.meta?.total || res.contacts?.length || 0,
+      };
+    } catch (err) {
+      return {
+        connected: false,
+        error: err.message,
+      };
+    }
+  }
+}
+
+const ghlService = new GHLService(GHL_CONFIG);
+
+// ─── GHL API Proxy Endpoints ──────────────────────────────────────────────
+
+// Test connection
+app.post('/api/ghl/test', async (req, res) => {
+  try {
+    const result = await ghlService.testConnection();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ connected: false, error: err.message });
+  }
+});
+
+// Get aggregate stats
+app.get('/api/ghl/stats', async (req, res) => {
+  try {
+    const stats = await ghlService.getStats();
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch GHL stats', details: err.message });
+  }
+});
+
+// Search contacts
+app.get('/api/ghl/contacts', async (req, res) => {
+  try {
+    const { q, limit } = req.query;
+    const result = await ghlService.searchContacts(q || '', parseInt(limit) || 20);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to search contacts', details: err.message });
+  }
+});
+
+// Get single contact
+app.get('/api/ghl/contacts/:id', async (req, res) => {
+  try {
+    const result = await ghlService.getContact(req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to get contact', details: err.message });
+  }
+});
+
+// Create contact
+app.post('/api/ghl/contacts', async (req, res) => {
+  try {
+    const result = await ghlService.createContact(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create contact', details: err.message });
+  }
+});
+
+// Get pipelines
+app.get('/api/ghl/pipelines', async (req, res) => {
+  try {
+    const result = await ghlService.getPipelines();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch pipelines', details: err.message });
+  }
+});
+
+// Get opportunities for a pipeline
+app.get('/api/ghl/pipelines/:id/opportunities', async (req, res) => {
+  try {
+    const { status, limit } = req.query;
+    const result = await ghlService.getOpportunities(req.params.id, {
+      status: status || 'open',
+      limit: parseInt(limit) || 50,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch opportunities', details: err.message });
+  }
+});
+
+// Update opportunity (move stage, update status)
+app.patch('/api/ghl/opportunities/:id', async (req, res) => {
+  try {
+    const result = await ghlService.updateOpportunity(req.params.id, req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update opportunity', details: err.message });
+  }
+});
+
+// Search custom objects
+app.post('/api/ghl/custom-objects/:schemaKey/search', async (req, res) => {
+  try {
+    const result = await ghlService.searchCustomObjects(req.params.schemaKey, req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to search custom objects', details: err.message });
+  }
+});
+
+console.log('GoHighLevel CRM integration loaded (location: ' + GHL_CONFIG.locationId + ')');
+
 
 // Start the watcher immediately on server startup
 startChannelWatcher();

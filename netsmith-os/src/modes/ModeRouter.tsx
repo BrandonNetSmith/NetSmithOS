@@ -13,8 +13,8 @@ import Docs from '../pages/Docs';
 import ActivityLog from '../pages/ActivityLog';
 import CostExplorer from '../pages/CostExplorer';
 import SettingsStub from '../pages/SettingsStub';
-import Boardroom from '../pages/Boardroom';
-import { ChatPanel } from '../bridge/ChatPanel';
+import { Boardroom } from '../pages/Boardroom';
+import { ChatLayout } from '../chat/ChatLayout';
 import { CommandPalette } from '../components/CommandPalette';
 import '../styles/command-palette.css';
 import { api } from '../api/client';
@@ -183,7 +183,7 @@ export function ModeRouter() {
             onBack={handleBack}
             onAgentDeleted={handleBack}
           />
-          <ChatPanel agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+          <ChatLayout agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
           {!chatOpen && (
             <button className="chat-fab" onClick={toggleChat} title="Chat with agents">
               <span style={{ fontSize: '24px' }}>💬</span>
@@ -303,7 +303,7 @@ export function ModeRouter() {
           {renderContent()}
         </div>
       </div>
-      <ChatPanel agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+      <ChatLayout agents={agents} isOpen={chatOpen} onClose={() => setChatOpen(false)} />
       {!chatOpen && (
         <button className="chat-fab" onClick={toggleChat} title="Chat with agents">
           <span style={{ fontSize: '24px' }}>💬</span>

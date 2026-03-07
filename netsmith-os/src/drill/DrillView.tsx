@@ -48,12 +48,26 @@ export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
     return () => { cancelled = true; };
   }, [agentId]);
 
-  // 15-second polling refresh for sessions and costs
+  // Refresh agent status + sessions on demand
+  const refreshAgent = useCallback(async () => {
+    try {
+      const agents = await api.getAgents();
+      const found = agents.find(a => a.agentId === agentId || a.id === agentId);
+      if (found) setAgent(found);
+    } catch { /* silent fail */ }
+  }, [agentId]);
+
+  // 15-second polling refresh for sessions AND agent status
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const sessionsData = await api.getAgentSessions(agentId);
+        const [sessionsData, agents] = await Promise.all([
+          api.getAgentSessions(agentId),
+          api.getAgents()
+        ]);
         setSessions(sessionsData.sessions || []);
+        const found = agents.find(a => a.agentId === agentId || a.id === agentId);
+        if (found) setAgent(found);
       } catch {
         /* silent fail */
       }
@@ -123,6 +137,7 @@ export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
         agentId={agentId}
         currentModel={agent?.model || null}
         agentStatus={agent?.status || "idle"}
+        onStopped={refreshAgent}
         onAgentDeleted={onAgentDeleted}
         onAgentRenamed={handleAgentRenamed}
       />

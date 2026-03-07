@@ -9,6 +9,7 @@ interface AgentControlBarProps {
   agentStatus: string;
   onAgentDeleted: () => void;
   onAgentRenamed: (newName: string) => void;
+  onStopped?: () => void;
 }
 
 const THINKING_LEVELS = [
@@ -29,7 +30,7 @@ function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
   return groups;
 }
 
-export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDeleted, onAgentRenamed }: AgentControlBarProps) {
+export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDeleted, onAgentRenamed, onStopped }: AgentControlBarProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(currentModel || "");
   const [thinkingLevel, setThinkingLevel] = useState("off");
@@ -104,8 +105,25 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
 
   const handleStop = async () => {
     setSaving("stop");
-    try { await api.stopAgent(agentId); } catch {}
-    setSaving(null);
+    try {
+      await api.stopAgent(agentId);
+      // Immediately trigger parent refresh
+      onStopped?.();
+      // Poll for status update: check every 2s for 10s
+      let polls = 0;
+      const pollInterval = setInterval(async () => {
+        polls++;
+        onStopped?.();
+        if (polls >= 5) {
+          clearInterval(pollInterval);
+          setSaving(null);
+        }
+      }, 2000);
+      // Clear saving state after brief delay (button text)
+      setTimeout(() => setSaving(null), 1500);
+    } catch {
+      setSaving(null);
+    }
   };
 
   const handleDelete = async () => {
