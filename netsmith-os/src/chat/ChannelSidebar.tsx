@@ -1,7 +1,7 @@
 import type { Channel, Agent } from '../api/types';
 
 const AGENT_EMOJI: Record<string, string> = {
-  main: '\u{1F9E0}', elon: '\u26A1', gary: '\u{1F4E2}', warren: '\u{1F4B0}',
+  main: '\u{1F9E0}', elon: '\u{1F528}', gary: '\u{1F4E2}', warren: '\u{1F4B0}',
   steve: '\u{1F3AF}', noah: '\u{1F4F1}', clay: '\u{1F99E}', calvin: '\u{1F99E}',
 };
 

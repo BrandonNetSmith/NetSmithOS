@@ -3,7 +3,7 @@ import type { Agent } from '../api/types';
 
 const AGENT_META: Record<string, { name: string; emoji: string }> = {
   main: { name: 'Tim', emoji: '\u{1F9E0}' },
-  elon: { name: 'Elon', emoji: '\u26A1' },
+  elon: { name: 'Elon', emoji: '\u{1F528}' },
   gary: { name: 'Gary', emoji: '\u{1F4E2}' },
   warren: { name: 'Warren', emoji: '\u{1F4B0}' },
   steve: { name: 'Steve', emoji: '\u{1F3AF}' },

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { api } from '../api/client'
 
 interface ActivityRun {
   ts: number
@@ -63,9 +64,7 @@ export default function ActivityLog() {
   const loadActivity = async () => {
     try {
       setError(null)
-      const res = await fetch('/api/activity')
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const data = await res.json()
+      const data = await api.getActivity()
       setRuns(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load activity')

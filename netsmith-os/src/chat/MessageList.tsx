@@ -12,7 +12,7 @@ interface MessageListProps {
 
 const AGENT_META: Record<string, { name: string; role: string; emoji: string }> = {
   main: { name: 'Tim', role: 'COO', emoji: '\u{1F9E0}' },
-  elon: { name: 'Elon', role: 'CTO', emoji: '\u26A1' },
+  elon: { name: 'Elon', role: 'CTO', emoji: '\u{1F528}' },
   gary: { name: 'Gary', role: 'CMO', emoji: '\u{1F4E2}' },
   warren: { name: 'Warren', role: 'CRO', emoji: '\u{1F4B0}' },
   steve: { name: 'Steve', role: 'CPO', emoji: '\u{1F3AF}' },

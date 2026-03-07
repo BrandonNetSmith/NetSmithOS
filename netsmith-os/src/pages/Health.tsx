@@ -255,7 +255,6 @@ export default function Health() {
 
       setLastRefresh(new Date())
     } catch (err) {
-      console.error('Failed to load health:', err)
       setError(err instanceof Error ? err.message : 'Failed to load health data')
     }
   }

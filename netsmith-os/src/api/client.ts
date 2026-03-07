@@ -24,6 +24,7 @@ export const api = {
   getCostsByAgent: () => fetchJSON<AgentCost[]>("/costs/by-agent"),
   getCronJobs: () => fetchJSON<CronJob[]>("/cron/jobs"),
   getAlerts: () => fetchJSON<Alert[]>("/alerts"),
+  getActivity: () => fetchJSON<any[]>("/activity"),
   getWorkspaceFiles: (agent: string) => fetchJSON<{ agent: string; path: string; files: any[] }>(`/workspace/${agent}/files`),
   getWorkspaceFile: (agent: string, path: string) => fetchJSON<{ content: string; path: string }>(`/workspace/${agent}/file?path=${encodeURIComponent(path)}`),
 
@@ -85,15 +86,4 @@ export const api = {
     fetchJSON<{ opportunities: any[] }>(`/ghl/pipelines/${pipelineId}/opportunities?status=${status}`),
 };
 
-// ─── Chat API ───────────────────────────────────────────────────────────────
 
-export async function sendChat(agentId: string, message: string): Promise<import("./types").ChatResponse> {
-  const r = await fetch(`${BASE}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agentId, message }),
-  });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.details || data.error || `Chat failed: ${r.status}`);
-  return data;
-}
