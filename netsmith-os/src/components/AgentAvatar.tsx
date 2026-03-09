@@ -1,14 +1,15 @@
+import { useState } from 'react';
 import type { Agent } from '../api/types';
 
 const AVATAR_MAP: Record<string, string> = {
-  main: '/avatars/tim.svg',
-  elon: '/avatars/elon.svg',
-  gary: '/avatars/gary.svg',
-  warren: '/avatars/warren.svg',
-  steve: '/avatars/steve.svg',
-  noah: '/avatars/noah.svg',
-  clay: '/avatars/clay.svg',
-  calvin: '/avatars/calvin.svg',
+  main: '/avatars/tim.jpg',
+  elon: '/avatars/elon.jpg',
+  gary: '/avatars/gary.jpg',
+  warren: '/avatars/warren.jpg',
+  steve: '/avatars/steve.jpg',
+  noah: '/avatars/noah.jpg',
+  clay: '/avatars/clay.jpg',
+  calvin: '/avatars/calvin.jpg',
 };
 
 const FALLBACK_EMOJI: Record<string, string> = {
@@ -30,10 +31,11 @@ interface AgentAvatarProps {
 }
 
 export function AgentAvatar({ agentId, emoji, size = 40, className = '' }: AgentAvatarProps) {
+  const [imageFailed, setImageFailed] = useState(false);
   const src = AVATAR_MAP[agentId];
   const fallbackEmoji = emoji || FALLBACK_EMOJI[agentId] || '⬡';
 
-  if (src) {
+  if (src && !imageFailed) {
     return (
       <img
         src={src}
@@ -42,17 +44,7 @@ export function AgentAvatar({ agentId, emoji, size = 40, className = '' }: Agent
         height={size}
         className={`agent-avatar ${className}`}
         style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-        onError={(e) => {
-          // Fall back to emoji if image fails
-          const parent = (e.target as HTMLImageElement).parentElement;
-          if (parent) {
-            (e.target as HTMLImageElement).style.display = 'none';
-            const span = document.createElement('span');
-            span.textContent = fallbackEmoji;
-            span.style.fontSize = `${size * 0.6}px`;
-            parent.appendChild(span);
-          }
-        }}
+        onError={() => setImageFailed(true)}
       />
     );
   }
