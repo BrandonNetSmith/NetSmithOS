@@ -78,6 +78,9 @@ const WORKSPACES = {
 };
 
 
+// ─── Enabled agents (only these will show as active in the dashboard) ────────────
+const ENABLED_AGENTS = new Set(['main', 'tim']);
+
 // ─── Agent display metadata ─────────────────────────────────────────────────────
 const AGENT_META = {
   main: { name: "Tim", role: "COO", emoji: "🧠" },
@@ -992,10 +995,12 @@ app.get('/api/agents', async (req, res) => {
     if (heartbeatAgents.length === 0) {
       heartbeatAgents = Object.keys(WORKSPACES)
         .filter(k => k !== 'tim')
-        .map(k => ({ agentId: k, enabled: true, every: null }));
+        .map(k => ({ agentId: k, enabled: ENABLED_AGENTS.has(k), every: null }));
     }
     const agents = heartbeatAgents.map(ha => {
       const agentId = ha.agentId;
+      // Override heartbeat enabled flag with ENABLED_AGENTS whitelist
+      const isEnabled = ENABLED_AGENTS.has(agentId);
       const workspace = WORKSPACES[agentId] || null;
 
       // Find latest session for this agent
@@ -1015,7 +1020,7 @@ app.get('/api/agents', async (req, res) => {
         // Agent was recently stopped — force idle regardless of session age
         status = 'idle';
       } else {
-        if (ha.enabled) {
+        if (isEnabled) {
           status = 'active';
         }
         if (latestSession) {
@@ -1033,7 +1038,7 @@ app.get('/api/agents', async (req, res) => {
         name: meta.name,
         role: meta.role,
         emoji: meta.emoji,
-        enabled: ha.enabled,
+        enabled: isEnabled,
         workspace,
         model: latestSession?.model || config.agents?.defaults?.model?.primary || null,
         status,
