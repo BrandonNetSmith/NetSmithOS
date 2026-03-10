@@ -61,6 +61,10 @@ async function setAgentPref(agentId, key, value) {
   await saveAgentPrefs(prefs);
 }
 
+// "main" is a reserved openclaw agent ID — remap it to "tim"
+const AGENT_ID_MAP = { main: 'tim' };
+function resolveAgentId(id) { return AGENT_ID_MAP[id] || id; }
+
 const WORKSPACES = {
   'main': join(HOME, 'steelclaw', 'workspace'),
   'tim': join(HOME, 'steelclaw', 'workspace'),
@@ -70,6 +74,7 @@ const WORKSPACES = {
   'noah': join(HOME, 'steelclaw', 'workspace-noah'),
   'steve': join(HOME, 'steelclaw', 'workspace-steve'),
   'clay': join(HOME, 'steelclaw', 'workspace-clay'),
+  'calvin': join(HOME, 'steelclaw', 'workspace-calvin'),
 };
 
 
@@ -83,6 +88,7 @@ const AGENT_META = {
   steve: { name: "Steve", role: "CPO", emoji: "🎯" },
   noah: { name: "Noah", role: "SMM", emoji: "📱" },
   clay: { name: "Clay", role: "Community", emoji: "🦞" },
+  calvin: { name: "Calvin", role: "Community", emoji: "🤝" },
 };
 
 // ─── Pricing data ───────────────────────────────────────────────────────────────
@@ -706,7 +712,7 @@ async function runStandupOrchestration(standupId, topic, attendees, filePath) {
       const prompt = responses.length === 0
         ? `Topic: ${topic}\n\nPlease give your standup update. Be concise — 2-4 sentences covering what you're working on, any blockers, and your priorities.`
         : `Topic: ${topic}\n\nPrior updates:\n${responses.map(r => `**${r.name}**: ${r.text}`).join('\n\n')}\n\nPlease give your standup update building on what others said.`;
-      const { stdout } = await execFileAsync('openclaw', ['agent', '--agent', agentId, '--message', prompt, '--json', '--timeout', '90'], { timeout: 100000, maxBuffer: 5*1024*1024 });
+      const { stdout } = await execFileAsync('openclaw', ['agent', '--agent', resolveAgentId(agentId), '--message', prompt, '--json', '--timeout', '90'], { timeout: 100000, maxBuffer: 5*1024*1024 });
       let responseText = stdout.trim();
       try {
         const parsed = JSON.parse(stdout);
@@ -2345,7 +2351,7 @@ app.post('/api/channels/:id/messages', async (req, res) => {
 
       const { stdout, stderr } = await execFileAsync('openclaw', [
         'agent',
-        '--agent', targetAgent,
+        '--agent', resolveAgentId(targetAgent),
         '--message', contextStr,
         '--json',
         '--timeout', '120',
@@ -2492,7 +2498,7 @@ app.post('/api/chat', express.json(), async (req, res) => {
   try {
     const { stdout, stderr } = await execFileAsync('openclaw', [
       'agent',
-      '--agent', agentId,
+      '--agent', resolveAgentId(agentId),
       '--message', message,
       '--json',
       '--timeout', '120'
@@ -3022,7 +3028,7 @@ async function runMeetingAgent(meeting, agentId) {
 
     const { stdout } = await execFileAsync('openclaw', [
       'agent',
-      '--agent', agentId,
+      '--agent', resolveAgentId(agentId),
       '--message', prompt,
       '--json',
       '--timeout', '120',

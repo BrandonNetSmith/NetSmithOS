@@ -1,31 +1,79 @@
 {
-  "agent": {
-    "model": "anthropic/claude-opus-4-6"
-  },
   "agents": {
     "defaults": {
+      "model": {
+        "primary": "google/gemini-2.0-flash-lite"
+      },
       "workspace": "workspace",
       "sandbox": {
-        "mode": "non-main"
+        "mode": "off"
       }
-    }
+    },
+    "list": [
+      {
+        "id": "tim",
+        "name": "tim",
+        "workspace": "~/steelclaw/workspace"
+      },
+      {
+        "id": "elon",
+        "name": "elon",
+        "workspace": "~/steelclaw/workspace-elon",
+        "model": "anthropic/claude-opus-4-6"
+      },
+      {
+        "id": "gary",
+        "name": "gary",
+        "workspace": "~/steelclaw/workspace-gary"
+      },
+      {
+        "id": "warren",
+        "name": "warren",
+        "workspace": "~/steelclaw/workspace-warren"
+      },
+      {
+        "id": "noah",
+        "name": "noah",
+        "workspace": "~/steelclaw/workspace-noah"
+      },
+      {
+        "id": "steve",
+        "name": "steve",
+        "workspace": "~/steelclaw/workspace-steve"
+      },
+      {
+        "id": "clay",
+        "name": "clay",
+        "workspace": "~/steelclaw/workspace-clay"
+      },
+      {
+        "id": "calvin",
+        "name": "calvin",
+        "workspace": "~/steelclaw/workspace-calvin"
+      }
+    ]
   },
   "channels": {
     "discord": {
+      "enabled": true,
       "token": "${DISCORD_BOT_TOKEN}",
       "dmPolicy": "pairing",
       "allowFrom": ["${DISCORD_OWNER_ID}"]
     },
     "slack": {
+      "enabled": true,
+      "mode": "socket",
       "botToken": "${SLACK_BOT_TOKEN}",
       "appToken": "${SLACK_APP_TOKEN}",
       "dmPolicy": "pairing"
     },
     "signal": {
+      "enabled": true,
       "phoneNumber": "${SIGNAL_PHONE_NUMBER}"
     }
   },
   "gateway": {
+    "mode": "local",
     "bind": "loopback",
     "auth": {
       "mode": "password"

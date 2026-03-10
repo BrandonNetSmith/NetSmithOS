@@ -27,6 +27,12 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "   OpenClaw will start but some channels may be offline."
 fi
 
+# Sync config to ~/.openclaw/openclaw.json
+OPENCLAW_DIR="$HOME/.openclaw"
+mkdir -p "$OPENCLAW_DIR"
+cp "$SCRIPT_DIR/config/openclaw.json" "$OPENCLAW_DIR/openclaw.json"
+echo "✅ Config synced to $OPENCLAW_DIR/openclaw.json"
+
 echo "🦞 Starting OpenClaw gateway..."
 echo "   Mode: local | Port: 18789"
 echo "   Channels: Discord, Slack, Signal"
