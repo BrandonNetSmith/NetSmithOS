@@ -1,17 +1,31 @@
 {
   "main": {
-    "thinkingLevel": "high"
+    "thinkingLevel": "high",
+    "enabled": true
   },
   "elon": {
-    "thinkingLevel": "high"
+    "thinkingLevel": "high",
+    "enabled": false
   },
   "warren": {
-    "thinkingLevel": "high"
+    "thinkingLevel": "high",
+    "enabled": false
   },
   "noah": {
-    "thinkingLevel": "medium"
+    "thinkingLevel": "medium",
+    "enabled": false
   },
   "gary": {
-    "thinkingLevel": "high"
+    "thinkingLevel": "high",
+    "enabled": false
+  },
+  "steve": {
+    "enabled": false
+  },
+  "clay": {
+    "enabled": false
+  },
+  "calvin": {
+    "enabled": false
   }
 }

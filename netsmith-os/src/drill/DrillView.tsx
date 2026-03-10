@@ -80,6 +80,10 @@ export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
     setAgent(prev => prev ? { ...prev, name: newName } : prev);
   }, []);
 
+  const handleAgentToggled = useCallback((enabled: boolean) => {
+    setAgent(prev => prev ? { ...prev, enabled, status: enabled ? 'active' : 'idle' } : prev);
+  }, []);
+
   if (loading) {
     return (
       <div className="drill-view">
@@ -137,9 +141,11 @@ export function DrillView({ agentId, onBack, onAgentDeleted }: DrillViewProps) {
         agentId={agentId}
         currentModel={agent?.model || null}
         agentStatus={agent?.status || "idle"}
+        agentEnabled={agent?.enabled ?? false}
         onStopped={refreshAgent}
         onAgentDeleted={onAgentDeleted}
         onAgentRenamed={handleAgentRenamed}
+        onAgentToggled={handleAgentToggled}
       />
 
       {/* 2-Column Grid: 6 Panels */}

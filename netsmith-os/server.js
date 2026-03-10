@@ -78,8 +78,13 @@ const WORKSPACES = {
 };
 
 
-// ─── Enabled agents (only these will show as active in the dashboard) ────────────
-const ENABLED_AGENTS = new Set(['main', 'tim']);
+// ─── Agent enabled check (reads from agent-prefs.json, defaults to true for tim/main) ─
+async function isAgentEnabled(agentId) {
+  const pref = await getAgentPref(agentId, 'enabled', null);
+  if (pref !== null) return pref;
+  // Default: only tim/main enabled
+  return agentId === 'main' || agentId === 'tim';
+}
 
 // ─── Agent display metadata ─────────────────────────────────────────────────────
 const AGENT_META = {
@@ -995,12 +1000,12 @@ app.get('/api/agents', async (req, res) => {
     if (heartbeatAgents.length === 0) {
       heartbeatAgents = Object.keys(WORKSPACES)
         .filter(k => k !== 'tim')
-        .map(k => ({ agentId: k, enabled: ENABLED_AGENTS.has(k), every: null }));
+        .map(k => ({ agentId: k, enabled: true, every: null }));
     }
-    const agents = heartbeatAgents.map(ha => {
+    const agents = await Promise.all(heartbeatAgents.map(async (ha) => {
       const agentId = ha.agentId;
-      // Override heartbeat enabled flag with ENABLED_AGENTS whitelist
-      const isEnabled = ENABLED_AGENTS.has(agentId);
+      // Read enabled state from agent-prefs.json (defaults: tim/main=true, others=false)
+      const isEnabled = await isAgentEnabled(agentId);
       const workspace = WORKSPACES[agentId] || null;
 
       // Find latest session for this agent
@@ -1046,7 +1051,7 @@ app.get('/api/agents', async (req, res) => {
         totalTokens: latestSession?.totalTokens || 0,
         sessionCount: agentSessions.length,
       };
-    });
+    }));
 
     res.json(agents);
   } catch (err) {
@@ -2092,6 +2097,22 @@ app.patch('/api/agents/:id/rename', express.json(), async (req, res) => {
     res.json({ success: true, agentId: id, name: name.trim() });
   } catch (err) {
     res.status(500).json({ error: 'Failed to rename agent', details: err.message });
+  }
+});
+
+// PATCH /api/agents/:id/enabled — Toggle agent enabled state
+app.patch('/api/agents/:id/enabled', express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) is required' });
+  if (!AGENT_META[id]) return res.status(404).json({ error: 'Unknown agent' });
+
+  try {
+    await setAgentPref(id, 'enabled', enabled);
+    cliCache.clear();
+    res.json({ success: true, agentId: id, enabled });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update agent', details: err.message });
   }
 });
 

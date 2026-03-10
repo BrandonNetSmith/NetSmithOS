@@ -8,8 +8,10 @@ interface AgentControlBarProps {
   agentId: string;
   currentModel: string | null;
   agentStatus: string;
+  agentEnabled: boolean;
   onAgentDeleted: () => void;
   onAgentRenamed: (newName: string) => void;
+  onAgentToggled: (enabled: boolean) => void;
   onStopped?: () => void;
 }
 
@@ -31,7 +33,7 @@ function groupModels(models: ModelInfo[]): Map<string, ModelInfo[]> {
   return groups;
 }
 
-export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDeleted, onAgentRenamed, onStopped }: AgentControlBarProps) {
+export function AgentControlBar({ agentId, currentModel, agentStatus, agentEnabled, onAgentDeleted, onAgentRenamed, onAgentToggled, onStopped }: AgentControlBarProps) {
   const toast = useToast();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState(currentModel || "");
@@ -171,6 +173,19 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
     setRenaming(false);
   };
 
+  const handleToggleEnabled = async () => {
+    const newEnabled = !agentEnabled;
+    setSaving("toggle");
+    try {
+      await api.setAgentEnabled(agentId, newEnabled);
+      toast.success(newEnabled ? "Agent enabled" : "Agent disabled");
+      onAgentToggled(newEnabled);
+    } catch (err) {
+      toast.error(`Failed to toggle agent: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+    setSaving(null);
+  };
+
   const filteredModels = modelSearch
     ? models.filter(m =>
         m.name.toLowerCase().includes(modelSearch.toLowerCase()) ||
@@ -264,6 +279,14 @@ export function AgentControlBar({ agentId, currentModel, agentStatus, onAgentDel
 
       {/* Action Buttons */}
       <div className="control-actions">
+        <button
+          className={`control-btn ${agentEnabled ? "enabled-btn" : "disabled-btn"}`}
+          onClick={handleToggleEnabled}
+          disabled={saving === "toggle"}
+        >
+          {saving === "toggle" ? "..." : agentEnabled ? "Enabled" : "Disabled"}
+        </button>
+
         {(agentStatus === "active" || agentStatus === "busy") && (
           <button className="control-btn stop-btn" onClick={handleStop} disabled={saving === "stop"}>
             {saving === "stop" ? "Stopping..." : "Stop"}

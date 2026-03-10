@@ -46,6 +46,8 @@ export const api = {
     fetchWithError(`${BASE}/agents/${id}/stop`, { method: "POST" }),
   renameAgent: (id: string, name: string) =>
     fetchWithError(`${BASE}/agents/${id}/rename`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }),
+  setAgentEnabled: (id: string, enabled: boolean) =>
+    fetchWithError(`${BASE}/agents/${id}/enabled`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) }),
   deleteAgent: (id: string) =>
     fetchWithError(`${BASE}/agents/${id}`, { method: "DELETE" }),
   runCronJob: (jobId: string) =>
